@@ -9,6 +9,7 @@
 //!                    operator sets ALLOW_ACTIVE=true for an authorized engagement.
 
 use crate::device;
+use crate::recon;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
@@ -65,6 +66,41 @@ impl Server {
                 "properties":{"mac":{"type":"string","description":"Optional MAC to filter filenames by."}},
                 "additionalProperties":false
             })),
+            tool("recon_list", "Survey the wireless environment from the recon database: nearby access points or client stations. Defaults to the last 120s ('around me now'); set max_age_seconds=0 for all-time.", json!({
+                "type":"object",
+                "properties":{
+                    "kind":{"type":"string","enum":["aps","clients"],"description":"'aps' (beaconing networks) or 'clients' (stations); default aps."},
+                    "max_age_seconds":{"type":"integer","minimum":0,"description":"Only include things heard within this many seconds (default 120; 0 = all time)."},
+                    "band":{"type":"string","enum":["2.4","5","6"],"description":"Optional band filter (GHz)."},
+                    "min_signal":{"type":"integer","description":"Optional minimum signal in dBm, e.g. -70 (stronger/closer only)."},
+                    "limit":{"type":"integer","minimum":1,"maximum":1000,"description":"Max rows (default 100)."}
+                },
+                "additionalProperties":false
+            })),
+            tool("recon_ap_detail", "Everything the recon engine knows about one access point (BSSID): its SSIDs, radio/band/security, signal, captured handshakes, and stations seen associated with it.", json!({
+                "type":"object",
+                "properties":{"bssid":{"type":"string","description":"AP BSSID, e.g. aa:bb:cc:dd:ee:ff."}},
+                "required":["bssid"],
+                "additionalProperties":false
+            })),
+            tool("handshakes", "List captured WPA handshakes (AP SSID/BSSID, client, time, EAPOL frames) from the recon database, newest first. Set since_seconds to poll for newly captured handshakes.", json!({
+                "type":"object",
+                "properties":{
+                    "since_seconds":{"type":"integer","minimum":0,"description":"Only handshakes captured within this many seconds (0 = all; default 0)."},
+                    "limit":{"type":"integer","minimum":1,"maximum":1000,"description":"Max rows (default 100)."}
+                },
+                "additionalProperties":false
+            })),
+            tool("channel_lock", "Stop recon channel-hopping and lock the radio to one channel (or an AP's channel) to maximize handshake capture. Call channel_unlock to resume hopping.", json!({
+                "type":"object",
+                "properties":{
+                    "channel":{"type":"integer","minimum":1,"description":"Channel number to lock to."},
+                    "bssid":{"type":"string","description":"Alternatively, lock to this AP's channel."},
+                    "seconds":{"type":"integer","minimum":1,"description":"Optional auto-unlock after this many seconds."}
+                },
+                "additionalProperties":false
+            })),
+            tool("channel_unlock", "Resume recon channel-hopping after a channel_lock.", json!({"type":"object","properties":{},"additionalProperties":false})),
             tool("notify", "Signal the operator on the physical Pager (log line, popup alert, vibration, LED or ringtone).", json!({
                 "type":"object",
                 "properties":{
@@ -73,16 +109,6 @@ impl Server {
                     "color":{"type":"string","enum":["red","green","blue"],"description":"Optional color for kind=log."}
                 },
                 "required":["kind","message"],
-                "additionalProperties":false
-            })),
-            tool("recon_examine", "Focus the recon engine: lock to a BSSID's channel, lock to a specific channel, or reset to channel-hopping.", json!({
-                "type":"object",
-                "properties":{
-                    "mode":{"type":"string","enum":["bssid","channel","reset"]},
-                    "value":{"type":"string","description":"BSSID (mode=bssid) or channel number (mode=channel)."},
-                    "seconds":{"type":"integer","minimum":1,"description":"Optional lock duration in seconds."}
-                },
-                "required":["mode"],
                 "additionalProperties":false
             })),
             tool("recon_set_bands", "Select which Wi-Fi bands the recon engine hops across.", json!({
@@ -132,7 +158,7 @@ impl Server {
                 "required":["command"],
                 "additionalProperties":false
             })));
-            tools.push(tool("duckyscript", "[FULL ACCESS] Run a single DuckyScript / PINEAPPLE_* command by name with arguments (structured alternative to 'bash'). Example: command='PINEAPPLE_EXAMINE_CHANNEL', args=['6','30'].", json!({
+            tools.push(tool("duckyscript", "[FULL ACCESS] Run any executable by name or absolute path with arguments (DuckyScript/PINEAPPLE_* or any other binary; structured alternative to 'bash'). Example: command='PINEAPPLE_EXAMINE_CHANNEL', args=['6','30'].", json!({
                 "type":"object",
                 "properties":{
                     "command":{"type":"string","description":"Command/function name, e.g. 'ALERT' or 'PINEAPPLE_SET_BANDS'."},
@@ -141,14 +167,24 @@ impl Server {
                 "required":["command"],
                 "additionalProperties":false
             })));
-            tools.push(tool("deauth_client", "[ACTIVE] Send deauthentication/disassociation frames to a client (or FF:FF:FF:FF:FF:FF for all) on an AP. Authorized engagements only.", json!({
+            tools.push(tool("deauth_broadcast", "[ACTIVE] Deauthenticate ALL clients on an AP (broadcast). Authorized engagements only.", json!({
                 "type":"object",
                 "properties":{
-                    "bssid":{"type":"string","description":"AP BSSID the client is on."},
-                    "target":{"type":"string","description":"Client MAC, or FF:FF:FF:FF:FF:FF for all."},
-                    "channel":{"type":"integer","minimum":1}
+                    "bssid":{"type":"string","description":"AP BSSID to target."},
+                    "channel":{"type":"integer","minimum":1},
+                    "csa":{"type":"boolean","description":"Use channel-switch-announcement method instead of deauth/disassoc frames (default false)."}
                 },
-                "required":["bssid","target","channel"],
+                "required":["bssid","channel"],
+                "additionalProperties":false
+            })));
+            tools.push(tool("deauth_clients", "[ACTIVE] Send directed deauth/disassoc frames to specific client MACs on an AP (more reliable than broadcast). Feed it a client list from recon_list(kind=clients) or recon_ap_detail. Authorized engagements only.", json!({
+                "type":"object",
+                "properties":{
+                    "bssid":{"type":"string","description":"AP BSSID the clients are on."},
+                    "channel":{"type":"integer","minimum":1},
+                    "clients":{"type":"array","items":{"type":"string"},"minItems":1,"description":"Client MAC addresses to disconnect."}
+                },
+                "required":["bssid","channel","clients"],
                 "additionalProperties":false
             })));
             tools.push(tool("device_filter_edit", "[ACTIVE] Edit a Pineapple device (MAC) filter list defining engagement scope.", json!({
@@ -221,28 +257,38 @@ impl Server {
                     other => Err(format!("unknown notify kind: {other}")),
                 }
             }
-            "recon_examine" => {
-                let mode = req_str(args, "mode")?;
+            "recon_list" => {
+                let kind = opt_str(args, "kind").unwrap_or_else(|| "aps".to_string());
+                let max_age = args.get("max_age_seconds").and_then(Value::as_i64).unwrap_or(120);
+                let band = opt_str(args, "band");
+                let min_signal = args.get("min_signal").and_then(Value::as_i64);
+                let limit = args.get("limit").and_then(Value::as_i64).unwrap_or(100);
+                recon::list(&kind, max_age, band.as_deref(), min_signal, limit)
+            }
+            "recon_ap_detail" => {
+                let bssid = req_str(args, "bssid")?;
+                if !is_mac(&bssid) {
+                    return Err("bssid must look like aa:bb:cc:dd:ee:ff".to_string());
+                }
+                recon::ap_detail(&bssid)
+            }
+            "handshakes" => {
+                let since = args.get("since_seconds").and_then(Value::as_i64).unwrap_or(0);
+                let limit = args.get("limit").and_then(Value::as_i64).unwrap_or(100);
+                recon::handshakes(since, limit)
+            }
+            "channel_lock" => {
                 let seconds = opt_num_str(args, "seconds");
-                match mode.as_str() {
-                    "reset" => device::run_cmd("PINEAPPLE_EXAMINE_RESET", &[]),
-                    "bssid" => {
-                        let v = req_str(args, "value")?;
-                        if !is_mac(&v) {
-                            return Err("value must be a BSSID like aa:bb:cc:dd:ee:ff".to_string());
-                        }
-                        device::run_cmd("PINEAPPLE_EXAMINE_BSSID", &with_opt(&[v], seconds))
-                    }
-                    "channel" => {
-                        let v = req_str(args, "value")?;
-                        if !is_num(&v) {
-                            return Err("value must be a numeric channel".to_string());
-                        }
-                        device::run_cmd("PINEAPPLE_EXAMINE_CHANNEL", &with_opt(&[v], seconds))
-                    }
-                    other => Err(format!("unknown mode: {other}")),
+                if let Some(bssid) = opt_str(args, "bssid") {
+                    let bssid = norm_mac(&bssid).ok_or("bssid must look like aa:bb:cc:dd:ee:ff")?;
+                    device::run_cmd("PINEAPPLE_EXAMINE_BSSID", &with_opt(&[bssid], seconds))
+                } else if let Some(ch) = opt_num_str(args, "channel") {
+                    device::run_cmd("PINEAPPLE_EXAMINE_CHANNEL", &with_opt(&[ch], seconds))
+                } else {
+                    Err("provide either 'channel' or 'bssid' to lock to".to_string())
                 }
             }
+            "channel_unlock" => device::run_cmd("PINEAPPLE_EXAMINE_RESET", &[]),
             "recon_set_bands" => {
                 let iface = opt_str(args, "interface").unwrap_or_else(|| "wlan1mon".to_string());
                 let bands = args
@@ -275,16 +321,14 @@ impl Server {
                 _ => device::run_cmd("WIFI_PCAP_STOP", &[]),
             },
             "find_client_ip" => {
-                let mac = req_str(args, "mac")?;
-                if !is_mac(&mac) {
-                    return Err("mac must look like aa:bb:cc:dd:ee:ff".to_string());
-                }
+                let mac = norm_mac(&req_str(args, "mac")?).ok_or("mac must look like aa:bb:cc:dd:ee:ff")?;
                 let timeout = opt_num_str(args, "timeout");
                 device::run_cmd("FIND_CLIENT_IP", &with_opt(&[mac], timeout))
             }
 
             // ---- full-access / active, gated behind ALLOW_ACTIVE ----
-            "bash" | "duckyscript" | "deauth_client" | "device_filter_edit" | "network_filter_edit"
+            "bash" | "duckyscript" | "deauth_broadcast" | "deauth_clients" | "device_filter_edit"
+            | "network_filter_edit"
                 if !self.allow_active =>
             {
                 Err("full-access tools are disabled; set ALLOW_ACTIVE=true in config.sh for an authorized engagement".to_string())
@@ -295,8 +339,10 @@ impl Server {
             }
             "duckyscript" => {
                 let cmd = req_str(args, "command")?;
-                if cmd.is_empty() || !cmd.bytes().all(|b| b.is_ascii_graphic() && b != b'/') {
-                    return Err("command must be a bare command name".to_string());
+                // Full-access tool: allow any executable by name or absolute path.
+                // Command::new does not invoke a shell, so args are passed verbatim.
+                if cmd.trim().is_empty() || cmd.bytes().any(|b| b == 0 || b == b'\n') {
+                    return Err("command must be a non-empty command name or path".to_string());
                 }
                 let mut call = Vec::new();
                 if let Some(a) = args.get("args").and_then(Value::as_array) {
@@ -306,19 +352,47 @@ impl Server {
                 }
                 device::run_cmd(&cmd, &call)
             }
-            "deauth_client" => {
-                let bssid = req_str(args, "bssid")?;
-                let target = req_str(args, "target")?;
-                let channel = req_str(args, "channel").or_else(|_| {
-                    args.get("channel").and_then(Value::as_u64).map(|n| n.to_string()).ok_or_else(|| "channel is required".to_string())
-                })?;
-                if !is_mac(&bssid) || !is_mac(&target) {
-                    return Err("bssid and target must be MAC addresses".to_string());
+            "deauth_broadcast" => {
+                let bssid = norm_mac(&req_str(args, "bssid")?).ok_or("bssid must be a MAC address")?;
+                let channel = num_arg(args, "channel")?;
+                if args.get("csa").and_then(Value::as_bool).unwrap_or(false) {
+                    device::run_cmd("PINEAPPLE_DEAUTH_CLIENT_CSA", &[bssid, channel])
+                } else {
+                    device::run_cmd(
+                        "PINEAPPLE_DEAUTH_CLIENT_ALL",
+                        &[bssid, "FF:FF:FF:FF:FF:FF".to_string(), channel],
+                    )
                 }
-                if !is_num(&channel) {
-                    return Err("channel must be numeric".to_string());
+            }
+            "deauth_clients" => {
+                let bssid = norm_mac(&req_str(args, "bssid")?).ok_or("bssid must be a MAC address")?;
+                let channel = num_arg(args, "channel")?;
+                let clients = str_array(args, "clients")?;
+                if clients.is_empty() {
+                    return Err("clients must contain at least one MAC".to_string());
                 }
-                device::run_cmd("PINEAPPLE_DEAUTH_CLIENT", &[bssid, target, channel])
+                let mut results = Vec::new();
+                for mac in &clients {
+                    let target = match norm_mac(mac) {
+                        Some(m) => m,
+                        None => {
+                            results.push(format!("{mac}: SKIPPED (not a MAC)"));
+                            continue;
+                        }
+                    };
+                    match device::run_cmd(
+                        "PINEAPPLE_DEAUTH_CLIENT",
+                        &[bssid.clone(), target.clone(), channel.clone()],
+                    ) {
+                        Ok(_) => results.push(format!("{target}: sent")),
+                        Err(e) => results.push(format!("{target}: ERROR {e}")),
+                    }
+                }
+                Ok(format!(
+                    "deauth sent to {} client(s) on {bssid} ch {channel}:\n{}",
+                    clients.len(),
+                    results.join("\n")
+                ))
             }
             "device_filter_edit" => {
                 let list = enum_arg(args, "list", &["allow", "deny"])?;
@@ -329,11 +403,9 @@ impl Server {
                         device::run_cmd("PINEAPPLE_DEVICE_FILTER_MODE", &[mode])
                     }
                     action => {
-                        let macs = str_array(args, "macs")?;
-                        for m in &macs {
-                            if !is_mac(m) {
-                                return Err(format!("not a MAC address: {m}"));
-                            }
+                        let mut macs = str_array(args, "macs")?;
+                        for m in macs.iter_mut() {
+                            *m = norm_mac(m).ok_or_else(|| format!("not a MAC address: {m}"))?;
                         }
                         let cmd = if action == "add" {
                             "PINEAPPLE_DEVICE_FILTER_ADD"
@@ -395,6 +467,11 @@ fn opt_str(args: &Value, key: &str) -> Option<String> {
     args.get(key).and_then(Value::as_str).map(|s| s.to_string())
 }
 
+/// Required numeric arg, accepted as a JSON number or numeric string.
+fn num_arg(args: &Value, key: &str) -> Result<String, String> {
+    opt_num_str(args, key).ok_or_else(|| format!("missing required numeric argument: {key}"))
+}
+
 /// Accept a number given either as a JSON number or a numeric string.
 fn opt_num_str(args: &Value, key: &str) -> Option<String> {
     match args.get(key) {
@@ -433,13 +510,26 @@ fn with_opt(base: &[String], extra: Option<String>) -> Vec<String> {
     v
 }
 
-/// True for strings that look like a MAC/BSSID (hex pairs separated by : or -).
+/// Normalize a MAC/BSSID given with or without `:`/`-` separators (as the recon
+/// tools emit the bare 12-hex form) into canonical `aa:bb:cc:dd:ee:ff`.
+fn norm_mac(s: &str) -> Option<String> {
+    let hex: String = s.chars().filter(|c| *c != ':' && *c != '-').collect();
+    if hex.len() == 12 && hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        let lower = hex.to_lowercase();
+        Some(
+            (0..6)
+                .map(|i| &lower[i * 2..i * 2 + 2])
+                .collect::<Vec<_>>()
+                .join(":"),
+        )
+    } else {
+        None
+    }
+}
+
+/// True for strings that look like a MAC/BSSID (with or without separators).
 fn is_mac(s: &str) -> bool {
-    let parts: Vec<&str> = s.split([':', '-']).collect();
-    parts.len() == 6
-        && parts
-            .iter()
-            .all(|p| p.len() == 2 && p.bytes().all(|b| b.is_ascii_hexdigit()))
+    norm_mac(s).is_some()
 }
 
 fn is_num(s: &str) -> bool {

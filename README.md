@@ -41,33 +41,47 @@ the Rust binary with path-traversal protection and size caps.
 |------|---------|
 | `system_info` | kernel, uptime, storage, memory, firmware |
 | `recon_context` | the selected AP/client this payload was launched against |
+| `recon_list` | survey nearby **APs** or **clients** from the recon DB; defaults to the last 120 s ("now"), with band / min-signal / age filters |
+| `recon_ap_detail` | everything known about one BSSID: SSIDs, band/security, signal, handshakes, associated stations |
+| `handshakes` | list captured WPA handshakes (AP, client, time, EAPOL frames); `since_seconds` for **new-handshake polling** |
+| `handshake_stats` | count `.22000`/`.pcap`/`.pcapng` loot files, optional MAC filter |
+| `channel_lock` | stop channel-hopping and lock to a channel (or an AP's channel) to capture handshakes |
+| `channel_unlock` | resume channel-hopping |
 | `list_loot` | list files under the loot directory |
 | `read_loot` | read a text loot file (size-capped, sandboxed) |
-| `handshake_stats` | count `.22000`/`.pcap`/`.pcapng`, optional MAC filter |
 | `notify` | signal the operator on the Pager (log/alert/vibrate/LED/ringtone) |
-| `recon_examine` | lock recon to a BSSID/channel, or reset to hopping |
 | `recon_set_bands` | choose 2.4/5/6 GHz bands for channel hopping |
 | `recon_new_session` | start a fresh recon session |
 | `list_filters` | show device (MAC) or network (SSID) filter lists |
 | `pcap_control` | start/stop the optimized Wi-Fi pcap log |
 | `find_client_ip` | resolve an associated client's IP from ARP/DHCP |
 
+The `recon_*` / `handshakes` tools read the recon daemon's SQLite DB
+(`/root/recon/recon.db`, override with `MCP_RECON_DB`). MAC/BSSID arguments are
+accepted with or without `:`/`-` separators.
+
 **Full access, only when `ALLOW_ACTIVE=true`:**
 
 | Tool | Purpose |
 |------|---------|
-| `bash` | run arbitrary shell command(s); DuckyScript functions are in scope |
+| `bash` | run arbitrary shell command(s); DuckyScript/`PINEAPPLE_*` on PATH |
 | `duckyscript` | run any DuckyScript / `PINEAPPLE_*` command by name with args |
-| `deauth_client` | send deauth/disassoc frames to a client (or all) on an AP |
+| `deauth_broadcast` | deauth **all** clients on an AP (deauth/disassoc, or CSA) |
+| `deauth_clients` | directed deauth of **specific** client MACs on an AP (feed from `recon_list`/`recon_ap_detail`) |
 | `device_filter_edit` | add/delete/clear/mode a MAC filter list |
 | `network_filter_edit` | add/delete/clear/mode an SSID filter list |
 
-`bash` and `duckyscript` give **complete control of the device**. The curated
-`deauth_client`/`*_filter_edit` tools are structured conveniences over the same
-capability. When `ALLOW_ACTIVE=false` (the default) all five are neither
-advertised in `tools/list` nor executable. `bash` runs via `bash -c` (multi-line
-commands supported); long-running work should be backgrounded (`cmd & echo
-started`) so it does not block the request.
+`bash` and `duckyscript` give **complete control of the device**; the other
+tools are structured conveniences over the same capability. When
+`ALLOW_ACTIVE=false` (the default) none of these are advertised in `tools/list`
+or executable. `bash` runs via `bash -c` (multi-line supported); long-running
+work should be backgrounded (`cmd & echo started`) so it doesn't block the
+request.
+
+**New-handshake notifications:** poll `handshakes` with `since_seconds` (e.g.
+every 30 s); when a new row appears, call `notify` to buzz/alert the operator on
+the Pager. (A device-native alert payload under `/root/payloads/alerts/` can also
+fire on `handshake_captured` events — a good follow-up.)
 
 ## Building
 

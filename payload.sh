@@ -4,7 +4,7 @@
 # Description: Runs a Model Context Protocol (MCP) server exposing the Pager's
 #              recon data, loot and (optionally) full device control so an
 #              operator's LLM client can drive an engagement over SSH.
-# Version: 1.1
+# Version: 1.2
 # Category: remote_access
 # Target: WiFi Pineapple Pager (mipsel_24kc)
 # Net Mode: N/A

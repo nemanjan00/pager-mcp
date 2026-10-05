@@ -19,6 +19,7 @@
 //! bridge.
 
 mod device;
+mod recon;
 mod tools;
 
 use serde_json::{json, Value};

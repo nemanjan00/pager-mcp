@@ -1,6 +1,6 @@
 [package]
 name = "mcp-pager"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 description = "Model Context Protocol server exposing WiFi Pineapple Pager recon/loot/control to an authorized operator's LLM client"
 license = "MIT"
