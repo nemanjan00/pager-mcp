@@ -1,0 +1,18 @@
+# Cross-compilation config for the WiFi Pineapple Pager (MIPS little-endian).
+#
+# The Pager is a mipsel OpenWRT device, so we build a static musl binary:
+#   rustup target add mipsel-unknown-linux-musl
+#
+# You need a mipsel musl C toolchain for the linker. Two common options:
+#   1. The `cross` tool (Docker-based, easiest):   cargo install cross
+#      then:  cross build --release --target mipsel-unknown-linux-musl
+#   2. A local musl cross toolchain (e.g. from https://musl.cc):
+#         mipsel-linux-musl-cross   -> provides mipsel-linux-musl-gcc
+#      Point the linker at it below (adjust the path to where you unpacked it).
+#
+# If you use `cross`, you can leave the [target] block below commented out.
+
+[target.mipsel-unknown-linux-musl]
+# Uncomment and set to your toolchain's gcc if building without `cross`:
+# linker = "mipsel-linux-musl-gcc"
+rustflags = ["-C", "target-feature=+crt-static"]

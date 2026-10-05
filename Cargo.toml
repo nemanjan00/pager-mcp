@@ -1,0 +1,20 @@
+[package]
+name = "mcp-pager"
+version = "1.0.0"
+edition = "2021"
+description = "Model Context Protocol server exposing WiFi Pineapple Pager recon/loot/control to an authorized operator's LLM client"
+license = "MIT"
+
+[[bin]]
+name = "mcp-pager"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"
+
+[profile.release]
+opt-level = "z"   # optimize for size; the Pager's flash/RAM are small
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
