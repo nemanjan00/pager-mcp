@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="360" viewBox="0 0 860 360" role="img" aria-label="Architecture: LLM client talks MCP over SSH stdio to the self-contained mcp-pager Rust binary, which runs read-only introspection and gated active commands on the device">
+  <defs>
+    <linearGradient id="abg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0b1220"/><stop offset="1" stop-color="#0e1626"/>
+    </linearGradient>
+    <linearGradient id="wire" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#34d399"/>
+    </linearGradient>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#34d399"/>
+    </marker>
+    <marker id="arrb" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#38bdf8"/>
+    </marker>
+  </defs>
+
+  <rect width="860" height="360" rx="16" fill="url(#abg)" stroke="#1e2d4a" stroke-width="2"/>
+
+  <!-- LLM client -->
+  <g font-family="'Segoe UI',Helvetica,Arial,sans-serif">
+    <rect x="40" y="128" width="190" height="104" rx="12" fill="#101c33" stroke="#38bdf8" stroke-width="1.6"/>
+    <text x="135" y="162" text-anchor="middle" font-size="16" font-weight="700" fill="#e2e8f0">LLM client</text>
+    <text x="135" y="186" text-anchor="middle" font-size="12.5" fill="#94a3b8">Claude Code /</text>
+    <text x="135" y="203" text-anchor="middle" font-size="12.5" fill="#94a3b8">Claude Desktop</text>
+    <text x="135" y="223" text-anchor="middle" font-family="monospace" font-size="11" fill="#64748b">tools/list · tools/call</text>
+  </g>
+
+  <!-- transport -->
+  <g>
+    <line x1="230" y1="180" x2="372" y2="180" stroke="url(#wire)" stroke-width="3" marker-end="url(#arr)"/>
+    <text x="301" y="166" text-anchor="middle" font-family="monospace" font-size="11.5" fill="#67e8f9">MCP · JSON-RPC 2.0</text>
+    <text x="301" y="201" text-anchor="middle" font-family="monospace" font-size="11.5" fill="#67e8f9">stdio over SSH</text>
+  </g>
+
+  <!-- device boundary -->
+  <rect x="384" y="36" width="440" height="288" rx="14" fill="#0a1526" stroke="#233a5e" stroke-width="1.6" stroke-dasharray="6 5"/>
+  <text x="404" y="60" font-family="monospace" font-size="12" fill="#60a5fa">WiFi Pineapple Pager · OpenWRT · mipsel_24kc</text>
+
+  <!-- mcp-pager binary -->
+  <g font-family="'Segoe UI',Helvetica,Arial,sans-serif">
+    <rect x="404" y="78" width="180" height="214" rx="12" fill="#10231c" stroke="#34d399" stroke-width="1.8"/>
+    <text x="494" y="108" text-anchor="middle" font-size="16" font-weight="800" fill="#d1fae5">mcp-pager</text>
+    <text x="494" y="128" text-anchor="middle" font-size="11.5" fill="#6ee7b7">Rust · self-contained</text>
+    <text x="494" y="145" text-anchor="middle" font-size="11" fill="#5f7d74">no bridge · no daemon</text>
+    <line x1="420" y1="158" x2="568" y2="158" stroke="#1f3b32"/>
+    <text x="494" y="182" text-anchor="middle" font-size="12" fill="#a7f3d0">std::process::Command</text>
+    <text x="494" y="200" text-anchor="middle" font-size="12" fill="#a7f3d0">exec() direct</text>
+    <text x="494" y="236" text-anchor="middle" font-size="11.5" fill="#94a3b8">+ path-sandboxed</text>
+    <text x="494" y="253" text-anchor="middle" font-size="11.5" fill="#94a3b8">loot / recon reads</text>
+    <text x="494" y="276" text-anchor="middle" font-size="11" fill="#5f7d74">SQLite recon.db</text>
+  </g>
+
+  <!-- passive -->
+  <g font-family="'Segoe UI',Helvetica,Arial,sans-serif">
+    <line x1="584" y1="150" x2="642" y2="150" stroke="#38bdf8" stroke-width="2.4" marker-end="url(#arrb)"/>
+    <rect x="644" y="118" width="160" height="66" rx="10" fill="#0f2537" stroke="#38bdf8" stroke-width="1.4"/>
+    <text x="724" y="142" text-anchor="middle" font-size="13.5" font-weight="700" fill="#bae6fd">Passive</text>
+    <text x="724" y="162" text-anchor="middle" font-size="11" fill="#7dd3fc">recon · loot · sysinfo</text>
+    <text x="724" y="176" text-anchor="middle" font-size="10.5" fill="#64748b">always on · read-only</text>
+  </g>
+
+  <!-- active -->
+  <g font-family="'Segoe UI',Helvetica,Arial,sans-serif">
+    <line x1="584" y1="220" x2="642" y2="220" stroke="#f59e0b" stroke-width="2.4" marker-end="url(#arr)" style="marker-end:url(#arr)"/>
+    <rect x="644" y="196" width="160" height="80" rx="10" fill="#231a0f" stroke="#f59e0b" stroke-width="1.4"/>
+    <text x="724" y="220" text-anchor="middle" font-size="13.5" font-weight="700" fill="#fcd34d">Active</text>
+    <text x="724" y="240" text-anchor="middle" font-size="11" fill="#fbbf24">deauth · bash · filters</text>
+    <text x="724" y="256" text-anchor="middle" font-size="11" fill="#fbbf24">DuckyScript / PINEAPPLE_*</text>
+    <text x="724" y="270" text-anchor="middle" font-size="10" fill="#b45309">gated: ALLOW_ACTIVE=true</text>
+  </g>
+</svg>

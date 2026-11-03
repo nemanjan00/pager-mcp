@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="250" viewBox="0 0 860 250" role="img" aria-label="Example flow: you ask Claude, Claude scans with recon_list, locks the channel, the Pager captures a handshake, and notify buzzes the operator">
+  <defs>
+    <linearGradient id="fbg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0b1220"/><stop offset="1" stop-color="#0e1626"/></linearGradient>
+    <linearGradient id="flow" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#34d399"/></linearGradient>
+    <marker id="fa" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#34d399"/></marker>
+  </defs>
+  <rect width="860" height="250" rx="16" fill="url(#fbg)" stroke="#1e2d4a" stroke-width="2"/>
+  <text x="30" y="40" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="14" font-weight="700" fill="#94a3b8">A capture loop, in one sentence to Claude</text>
+
+  <!-- connecting line -->
+  <line x1="92" y1="140" x2="768" y2="140" stroke="url(#flow)" stroke-width="2.5" stroke-dasharray="2 6" marker-end="url(#fa)"/>
+
+  <g font-family="'Segoe UI',Helvetica,Arial,sans-serif" text-anchor="middle">
+    <!-- step 1 -->
+    <circle cx="92" cy="140" r="26" fill="#101c33" stroke="#38bdf8" stroke-width="2"/>
+    <text x="92" y="146" font-size="22">🗣️</text>
+    <text x="92" y="190" font-size="12.5" font-weight="700" fill="#e2e8f0">You ask</text>
+    <text x="92" y="207" font-size="10.5" fill="#64748b">plain language</text>
+
+    <!-- step 2 -->
+    <circle cx="261" cy="140" r="26" fill="#101c33" stroke="#38bdf8" stroke-width="2"/>
+    <text x="261" y="147" font-size="20">📡</text>
+    <text x="261" y="190" font-size="12.5" font-weight="700" fill="#e2e8f0">Scan</text>
+    <text x="261" y="207" font-family="monospace" font-size="10.5" fill="#67e8f9">recon_list</text>
+
+    <!-- step 3 -->
+    <circle cx="430" cy="140" r="26" fill="#101c33" stroke="#38bdf8" stroke-width="2"/>
+    <text x="430" y="147" font-size="20">🔒</text>
+    <text x="430" y="190" font-size="12.5" font-weight="700" fill="#e2e8f0">Lock channel</text>
+    <text x="430" y="207" font-family="monospace" font-size="10.5" fill="#67e8f9">channel_lock</text>
+
+    <!-- step 4 -->
+    <circle cx="599" cy="140" r="26" fill="#10231c" stroke="#34d399" stroke-width="2"/>
+    <text x="599" y="147" font-size="20">🤝</text>
+    <text x="599" y="190" font-size="12.5" font-weight="700" fill="#d1fae5">Handshake</text>
+    <text x="599" y="207" font-family="monospace" font-size="10.5" fill="#6ee7b7">handshakes +since</text>
+
+    <!-- step 5 -->
+    <circle cx="768" cy="140" r="26" fill="#231a0f" stroke="#f59e0b" stroke-width="2"/>
+    <text x="768" y="147" font-size="20">📳</text>
+    <text x="768" y="190" font-size="12.5" font-weight="700" fill="#fcd34d">Buzz you</text>
+    <text x="768" y="207" font-family="monospace" font-size="10.5" fill="#fbbf24">notify</text>
+  </g>
+
+  <text x="430" y="78" font-family="monospace" font-size="12.5" text-anchor="middle" fill="#cbd5e1">"Lock to the strongest 5 GHz AP and ping me the moment a handshake lands."</text>
+</svg>

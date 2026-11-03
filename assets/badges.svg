@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="730" height="28" viewBox="0 0 730 28" role="img" aria-label="Badges: Rust, target mipsel_24kc, protocol MCP, transport SSH stdio, size ~300 KB, default read-only">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff" stop-opacity="0.08"/><stop offset="1" stop-color="#000000" stop-opacity="0.18"/></linearGradient>
+  </defs>
+  <g font-family="'Segoe UI',Verdana,Helvetica,sans-serif" font-size="11" font-weight="600">
+    <!-- badge 1: lang / rust -->
+    <g>
+      <rect x="0" y="0" width="44" height="28" rx="5" fill="#2b2b2b"/>
+      <rect x="44" y="0" width="52" height="28" rx="5" fill="#dea584"/>
+      <rect x="40" y="0" width="12" height="28" fill="#2b2b2b"/><rect x="44" y="0" width="8" height="28" fill="#dea584"/>
+      <text x="22" y="18" text-anchor="middle" fill="#fff">lang</text>
+      <text x="70" y="18" text-anchor="middle" fill="#2b2b2b">Rust</text>
+    </g>
+    <!-- badge 2: target -->
+    <g transform="translate(104,0)">
+      <rect x="0" y="0" width="52" height="28" rx="5" fill="#2b2b2b"/>
+      <rect x="48" y="0" width="86" height="28" rx="5" fill="#0ea5e9"/><rect x="48" y="0" width="8" height="28" fill="#2b2b2b"/>
+      <text x="26" y="18" text-anchor="middle" fill="#fff">target</text>
+      <text x="95" y="18" text-anchor="middle" fill="#fff">mipsel_24kc</text>
+    </g>
+    <!-- badge 3: protocol -->
+    <g transform="translate(246,0)">
+      <rect x="0" y="0" width="62" height="28" rx="5" fill="#2b2b2b"/>
+      <rect x="58" y="0" width="46" height="28" rx="5" fill="#8b5cf6"/><rect x="58" y="0" width="8" height="28" fill="#2b2b2b"/>
+      <text x="31" y="18" text-anchor="middle" fill="#fff">protocol</text>
+      <text x="85" y="18" text-anchor="middle" fill="#fff">MCP</text>
+    </g>
+    <!-- badge 4: transport -->
+    <g transform="translate(360,0)">
+      <rect x="0" y="0" width="68" height="28" rx="5" fill="#2b2b2b"/>
+      <rect x="64" y="0" width="76" height="28" rx="5" fill="#14b8a6"/><rect x="64" y="0" width="8" height="28" fill="#2b2b2b"/>
+      <text x="34" y="18" text-anchor="middle" fill="#fff">transport</text>
+      <text x="106" y="18" text-anchor="middle" fill="#fff">SSH stdio</text>
+    </g>
+    <!-- badge 5: size -->
+    <g transform="translate(508,0)">
+      <rect x="0" y="0" width="34" height="28" rx="5" fill="#2b2b2b"/>
+      <rect x="30" y="0" width="56" height="28" rx="5" fill="#64748b"/><rect x="30" y="0" width="8" height="28" fill="#2b2b2b"/>
+      <text x="17" y="18" text-anchor="middle" fill="#fff">size</text>
+      <text x="62" y="18" text-anchor="middle" fill="#fff">~300 KB</text>
+    </g>
+    <!-- badge 6: default -->
+    <g transform="translate(602,0)">
+      <rect x="0" y="0" width="52" height="28" rx="5" fill="#2b2b2b"/>
+      <rect x="48" y="0" width="80" height="28" rx="5" fill="#16a34a"/><rect x="48" y="0" width="8" height="28" fill="#2b2b2b"/>
+      <text x="26" y="18" text-anchor="middle" fill="#fff">default</text>
+      <text x="92" y="18" text-anchor="middle" fill="#fff">read-only</text>
+    </g>
+  </g>
+  <rect x="0" y="0" width="730" height="28" rx="5" fill="url(#g)"/>
+</svg>

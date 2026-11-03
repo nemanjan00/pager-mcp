@@ -1,109 +1,123 @@
-# MCP Pager Server
+<div align="center">
 
-An **MCP (Model Context Protocol) server for the Hak5 WiFi Pineapple Pager**,
-written in Rust. It exposes the Pager's recon data, captured loot, and
-(optionally) authorized engagement controls as MCP *tools*, so an operator can
-drive the Pager from an LLM client such as Claude Code or Claude Desktop.
+![MCP Pager Server](assets/banner.svg)
 
-> **Authorized use only.** This payload controls a wireless auditing device.
-> Run it only against networks and clients you own or are explicitly authorized
-> to test. Traffic-affecting tools are disabled by default — see *Active tools*.
+![badges](assets/badges.svg)
+
+**Your LLM, holding a Wi-Fi scanner.**
+A tiny Rust [MCP](https://modelcontextprotocol.io) server that lets Claude *see* what the
+Hak5 WiFi Pineapple Pager sees — nearby APs, clients, captured handshakes, loot —
+and, when you explicitly arm it, *act* on an authorized engagement.
+
+</div>
+
+> [!WARNING]
+> **Authorized use only.** This payload controls a wireless auditing device. Run it
+> only against networks and clients you own or are explicitly authorized to test.
+> Every traffic-affecting tool is **disabled by default** and must be armed with
+> `ALLOW_ACTIVE=true` — see [What it can do](#what-it-can-do).
+
+---
+
+## Why this is cool
+
+Point Claude at your Pager over SSH and ask in plain language:
+
+> *"What APs are around me right now on 5 GHz?"*
+> *"Lock to the channel of the strongest one and tell me the moment a handshake lands."*
+> *"Which of my associated clients just pulled a DHCP lease, and what's its IP?"*
+
+Claude calls the right tools, reads the recon database, watches the loot folder,
+and buzzes the device when something interesting happens — no web UI, no tunnel,
+no daemon. One self-contained **~300 KB** binary that runs straight over SSH stdio.
+
+---
+
+## What it can do
+
+The server advertises two tiers of tools. **Passive is always on. Active is opt-in.**
+
+### 🟦 Passive — always available, read-only
+
+> Recon, loot, and introspection. Nothing touches the air.
+
+| Tool | What it gives Claude |
+|------|----------------------|
+| `system_info` | kernel, uptime, storage, memory, firmware |
+| `recon_context` | the AP/client this payload was launched against |
+| `recon_list` | survey nearby **APs** or **clients** (band / min-signal / age filters; defaults to the last 120 s) |
+| `recon_ap_detail` | everything about one BSSID — SSIDs, band, security, signal, handshakes, stations |
+| `handshakes` | captured WPA handshakes; `since_seconds` enables **new-handshake polling** |
+| `handshake_stats` | count `.22000` / `.pcap` / `.pcapng` loot, optional MAC filter |
+| `channel_lock` / `channel_unlock` | pin to a channel (or an AP's channel) to catch handshakes, then resume hopping |
+| `list_loot` / `read_loot` | browse and read loot files (sandboxed, size-capped) |
+| `find_client_ip` | resolve an associated client's IP from ARP/DHCP |
+| `recon_set_bands` / `recon_new_session` | choose 2.4/5/6 GHz bands · start a fresh recon session |
+| `list_filters` | show device (MAC) or network (SSID) filter lists |
+| `pcap_control` | start/stop the optimized Wi-Fi pcap log |
+| `notify` | buzz the operator on the Pager (log / alert / vibrate / LED / ringtone) |
+
+### 🟧 Active — only when `ALLOW_ACTIVE=true`
+
+> Full device control. Advertise these **only** for an authorized engagement.
+
+| Tool | What it does |
+|------|--------------|
+| `bash` | run arbitrary shell command(s); DuckyScript / `PINEAPPLE_*` are on `PATH` |
+| `duckyscript` | run any DuckyScript / `PINEAPPLE_*` command by name with args |
+| `deauth_broadcast` | deauth **all** clients on an AP (deauth/disassoc, or CSA) |
+| `deauth_clients` | directed deauth of **specific** client MACs (feed from `recon_list`) |
+| `device_filter_edit` / `network_filter_edit` | manage MAC / SSID filter lists |
+
+When `ALLOW_ACTIVE=false` (the default) these are neither listed in `tools/list`
+nor executable. With it on, the client has complete control of the device.
+
+> 💡 **Hands-free capture loop:** poll `handshakes` with `since_seconds` (~every 30 s);
+> when a new row appears, fire `notify` to buzz the operator. A device-native alert
+> payload under `/root/payloads/alerts/` can also trigger on `handshake_captured`.
 
 ---
 
 ## How it works
 
-```
-  LLM client (Claude Code / Desktop)
-        │  MCP (JSON-RPC 2.0, newline-delimited)
-        │  stdio over SSH   (or TCP over an SSH tunnel)
-        ▼
-  mcp-pager  ─┬─▶ recon env vars, /root/loot files, uname/df/...  (read-only)
-  (Rust,      └─▶ DuckyScript + PINEAPPLE_* commands, run directly
-   mipsel_24kc)       LOG/ALERT/LED, EXAMINE, SET_BANDS, filters, deauth, bash…
-```
+![Architecture](assets/architecture.svg)
 
-On the Pager, the DuckyScript/`PINEAPPLE_*` commands are plain ELF binaries on
-`PATH` (verified: `/usr/bin/LOG`, `/usr/bin/PINEAPPLE_EXAMINE_RESET`, …), and
-they work when invoked directly — no payload shell context required. So the Rust
-binary just `exec`s them via `std::process::Command`. There is **no bridge and no
-daemon dependency**: `mcp-pager` is self-contained and can run straight over SSH
-stdio, or be launched on-device by `payload.sh` as a background TCP service.
+A typical capture loop — one sentence in, one buzz out:
 
-Read-only introspection (loot files, recon env, system info) is done directly by
-the Rust binary with path-traversal protection and size caps.
+![Flow](assets/flow.svg)
 
-## Tools
+On the Pager, the DuckyScript / `PINEAPPLE_*` commands are plain ELF binaries on
+`PATH` (`/usr/bin/LOG`, `/usr/bin/PINEAPPLE_EXAMINE_RESET`, …) that work when invoked
+directly — no payload shell context required. So `mcp-pager` just `exec`s them via
+`std::process::Command`. **No bridge, no daemon dependency.** Read-only
+introspection (loot, recon env, system info) is handled in-process with
+path-traversal protection and size caps. The `recon_*` / `handshakes` tools read the
+recon daemon's SQLite DB (`/root/recon/recon.db`, override with `MCP_RECON_DB`);
+MAC/BSSID args are accepted with or without `:` / `-` separators.
 
-**Always available (passive / read-only):**
+---
 
-| Tool | Purpose |
-|------|---------|
-| `system_info` | kernel, uptime, storage, memory, firmware |
-| `recon_context` | the selected AP/client this payload was launched against |
-| `recon_list` | survey nearby **APs** or **clients** from the recon DB; defaults to the last 120 s ("now"), with band / min-signal / age filters |
-| `recon_ap_detail` | everything known about one BSSID: SSIDs, band/security, signal, handshakes, associated stations |
-| `handshakes` | list captured WPA handshakes (AP, client, time, EAPOL frames); `since_seconds` for **new-handshake polling** |
-| `handshake_stats` | count `.22000`/`.pcap`/`.pcapng` loot files, optional MAC filter |
-| `channel_lock` | stop channel-hopping and lock to a channel (or an AP's channel) to capture handshakes |
-| `channel_unlock` | resume channel-hopping |
-| `list_loot` | list files under the loot directory |
-| `read_loot` | read a text loot file (size-capped, sandboxed) |
-| `notify` | signal the operator on the Pager (log/alert/vibrate/LED/ringtone) |
-| `recon_set_bands` | choose 2.4/5/6 GHz bands for channel hopping |
-| `recon_new_session` | start a fresh recon session |
-| `list_filters` | show device (MAC) or network (SSID) filter lists |
-| `pcap_control` | start/stop the optimized Wi-Fi pcap log |
-| `find_client_ip` | resolve an associated client's IP from ARP/DHCP |
+## Install
 
-The `recon_*` / `handshakes` tools read the recon daemon's SQLite DB
-(`/root/recon/recon.db`, override with `MCP_RECON_DB`). MAC/BSSID arguments are
-accepted with or without `:`/`-` separators.
-
-**Full access, only when `ALLOW_ACTIVE=true`:**
-
-| Tool | Purpose |
-|------|---------|
-| `bash` | run arbitrary shell command(s); DuckyScript/`PINEAPPLE_*` on PATH |
-| `duckyscript` | run any DuckyScript / `PINEAPPLE_*` command by name with args |
-| `deauth_broadcast` | deauth **all** clients on an AP (deauth/disassoc, or CSA) |
-| `deauth_clients` | directed deauth of **specific** client MACs on an AP (feed from `recon_list`/`recon_ap_detail`) |
-| `device_filter_edit` | add/delete/clear/mode a MAC filter list |
-| `network_filter_edit` | add/delete/clear/mode an SSID filter list |
-
-`bash` and `duckyscript` give **complete control of the device**; the other
-tools are structured conveniences over the same capability. When
-`ALLOW_ACTIVE=false` (the default) none of these are advertised in `tools/list`
-or executable. `bash` runs via `bash -c` (multi-line supported); long-running
-work should be backgrounded (`cmd & echo started`) so it doesn't block the
-request.
-
-**New-handshake notifications:** poll `handshakes` with `since_seconds` (e.g.
-every 30 s); when a new row appears, call `notify` to buzz/alert the operator on
-the Pager. (A device-native alert payload under `/root/payloads/alerts/` can also
-fire on `handshake_captured` events — a good follow-up.)
-
-## Building
+### 1. Build the binary
 
 The Pager is a **MIPS little-endian, soft-float** OpenWRT 24.10 device
-(MediaTek MT7628, 24KEc core, no FPU; OpenWRT target `ramips/mt76x8`, arch
-`mipsel_24kc`). Its musl loader is `/lib/ld-musl-mipsel-sf.so.1`. Build for
-`mipsel-unknown-linux-musl` (which is soft-float) with a **matching soft-float
-toolchain**, and stage the binary into `bin/`.
+(MediaTek MT7628, 24KEc core, no FPU; target `ramips/mt76x8`, arch `mipsel_24kc`;
+musl loader `/lib/ld-musl-mipsel-sf.so.1`). Build for `mipsel-unknown-linux-musl`
+with a **matching soft-float toolchain**.
 
-The verified-working method uses the **OpenWRT 24.10.1 SDK** for the Pager's
-exact target (soft-float gcc 13.3.0 musl), with nightly Rust building `std` from
-source:
+<details>
+<summary><b>Verified method — OpenWRT 24.10.1 SDK + nightly build-std</b> (click to expand)</summary>
 
 ```bash
-# 1) Fetch + unpack the matching SDK:
+# 1) Fetch + unpack the matching SDK
 curl -LO https://downloads.openwrt.org/releases/24.10.1/targets/ramips/mt76x8/openwrt-sdk-24.10.1-ramips-mt76x8_gcc-13.3.0_musl.Linux-x86_64.tar.zst
 tar --use-compress-program=unzstd -xf openwrt-sdk-24.10.1-*.tar.zst
 SDK=$PWD/openwrt-sdk-24.10.1-ramips-mt76x8_gcc-13.3.0_musl.Linux-x86_64
 export PATH="$SDK/staging_dir/toolchain-mipsel_24kc_gcc-13.3.0_musl/bin:$PATH"
 export STAGING_DIR="$SDK/staging_dir"
 
-# 2) Build (nightly + build-std; rustup component add rust-src --toolchain nightly):
+# 2) Build (needs: rustup component add rust-src --toolchain nightly)
 CARGO_TARGET_MIPSEL_UNKNOWN_LINUX_MUSL_LINKER=mipsel-openwrt-linux-musl-gcc \
 RUSTFLAGS="-Zunstable-options -Cpanic=immediate-abort" \
 cargo +nightly build --release --target mipsel-unknown-linux-musl \
@@ -111,35 +125,32 @@ cargo +nightly build --release --target mipsel-unknown-linux-musl \
 cp target/mipsel-unknown-linux-musl/release/mcp-pager bin/mcp-pager
 ```
 
-This produces a ~300 KB binary whose interpreter is `/lib/ld-musl-mipsel-sf.so.1`
-— confirmed running on the device. `build.sh` also accepts `METHOD=cross` (the
-`cross` tool's image is likewise soft-float) if you prefer Docker.
+Produces a ~300 KB binary whose interpreter is `/lib/ld-musl-mipsel-sf.so.1` —
+confirmed running on-device. `build.sh` also accepts `METHOD=cross` (Docker) if you prefer.
 
-> **Avoid a hard-float toolchain.** The stock `mipsel-linux-musl-cross` from
-> musl.cc is hard-float; it links with a soft/hard-float ABI-mismatch warning and
-> targets `/lib/ld-musl-mipsel.so.1`, which does **not** exist on the Pager — the
-> binary will fail to load (`not found`). Use the OpenWRT SDK or `cross`.
+> [!CAUTION]
+> **Avoid a hard-float toolchain.** The stock `mipsel-linux-musl-cross` from musl.cc
+> is hard-float; it links with an ABI-mismatch warning and targets
+> `/lib/ld-musl-mipsel.so.1`, which does **not** exist on the Pager — the binary
+> fails to load (`not found`). Use the OpenWRT SDK or `cross`.
 
-Binary payloads are not accepted into the public Hak5 repo yet, but run fine for
-personal use. `payload.sh` restores the executable bit on every launch, so it is
-safe to transfer as a zip.
+</details>
 
-## Installing the binary
+### 2. Copy it to the Pager
 
-Copy `bin/mcp-pager` onto the Pager — e.g. `scp bin/mcp-pager
-root@172.16.52.1:/root/mcp-pager`. That alone is enough for the recommended
-connection method below. To run it as an on-device background service with a
-status menu, also copy `payload.sh` + `config.sh` (and `bin/mcp-pager`) into a
-payload directory via the Pager UI or `/root/payloads/...`.
+```bash
+scp bin/mcp-pager root@172.16.52.1:/root/mcp-pager
+```
 
-## Connecting an MCP client
+That alone is enough for the recommended connection below. (For the on-device
+background service, also copy `payload.sh` + `config.sh` into a payload directory
+via the Pager UI or `/root/payloads/...`. `payload.sh` restores the executable bit
+on every launch, so it's safe to ship as a zip.)
 
-### Recommended: stdio over SSH (no tunnel, no daemon)
+### 3. Wire up your MCP client — stdio over SSH *(recommended: no tunnel, no daemon)*
 
-Because the binary is self-contained, the MCP client just launches it over SSH
-and talks to its stdio. This is how it's tested.
-
-**Claude Code** (`.mcp.json` or `claude mcp add`):
+The binary is self-contained, so the client just launches it over SSH and talks to
+its stdio. **Claude Code** (`.mcp.json` or `claude mcp add`):
 
 ```json
 {
@@ -152,12 +163,15 @@ and talks to its stdio. This is how it's tested.
 }
 ```
 
-Drop `MCP_ALLOW_ACTIVE=1` to keep it passive/read-only. Add `MCP_LOOT_DIR=...`
-to point elsewhere. **Claude Desktop** (`claude_desktop_config.json`): same shape.
+Drop `MCP_ALLOW_ACTIVE=1` to stay passive/read-only. Add `MCP_LOOT_DIR=...` to point
+elsewhere. **Claude Desktop** (`claude_desktop_config.json`) uses the same shape.
 
-### Alternative: on-device TCP service + tunnel
+That's it — open the client and ask it what's on the air.
 
-Launch `payload.sh` on the Pager (LED goes **blue solid**); it runs
+<details>
+<summary><b>Alternative — on-device TCP service + SSH tunnel</b></summary>
+
+Launch `payload.sh` on the Pager (LED → **blue solid**); it runs
 `mcp-pager --tcp 127.0.0.1:8099`. Then from your workstation:
 
 ```bash
@@ -165,26 +179,27 @@ ssh -L 8099:127.0.0.1:8099 root@172.16.52.1          # tunnel
 # MCP client command:  socat STDIO TCP:127.0.0.1:8099
 ```
 
-If you set `MCP_TCP_TOKEN` (in `config.sh`), the client must send it as `_auth`
-in the `initialize` params. Keep `BIND_ADDR` on loopback unless you are on an
-isolated engagement network, in which case always set a token.
+Set `MCP_TCP_TOKEN` (in `config.sh`) and the client must send it as `_auth` in the
+`initialize` params. Keep `BIND_ADDR` on loopback unless you're on an isolated
+engagement network — in which case always set a token.
 
-Alternatively, skip TCP entirely and run the binary in **stdio** mode directly
-over SSH (`command: "ssh"`, `args: ["root@pager", "/root/payloads/.../bin/mcp-pager"]`)
-— though launching via `payload.sh` is recommended so the DuckyScript bridge and
-on-device controls are available.
+</details>
 
-## Security notes
+---
 
-- Access control is the SSH/transport layer: stdio-over-SSH inherits your SSH
-  auth; TCP mode defaults to a **loopback** bind, and off-loopback binds should
-  always set `MCP_TCP_TOKEN` and run only on an isolated engagement network.
-- `read_loot`/`list_loot` are sandboxed to `MCP_LOOT_DIR` and reject `..`
-  traversal; `read_loot` is size-capped (`MCP_READ_CAP_BYTES`).
-- Full-access tools (`bash`, `duckyscript`, `deauth_client`, `*_filter_edit`) are
-  gated by `MCP_ALLOW_ACTIVE` and **off by default** — when off they are neither
-  advertised nor executable. With them on, the client has full device control, so
-  only enable them for an authorized engagement.
+## Security model
+
+- **Access control lives at the transport.** stdio-over-SSH inherits your SSH auth;
+  TCP mode binds **loopback** by default, and any off-loopback bind should set
+  `MCP_TCP_TOKEN` and run only on an isolated engagement network.
+- `read_loot` / `list_loot` are sandboxed to `MCP_LOOT_DIR`, reject `..` traversal,
+  and `read_loot` is size-capped (`MCP_READ_CAP_BYTES`).
+- Active tools (`bash`, `duckyscript`, `deauth_*`, `*_filter_edit`) are gated by
+  `MCP_ALLOW_ACTIVE` and **off by default** — when off they are neither advertised
+  nor executable. With them on, the client has full device control, so arm them only
+  for an authorized engagement.
+
+---
 
 ## Files
 
@@ -193,5 +208,10 @@ on-device controls are available.
 | `payload.sh` | on-device launcher: runs `mcp-pager --tcp`, shows a status menu |
 | `config.sh` | operator configuration |
 | `build.sh` | cross-compile helper → `bin/mcp-pager` |
-| `src/` | Rust MCP server (`main.rs` protocol/transport, `tools.rs` catalog + dispatch, `device.rs` introspection & direct command exec) |
+| `src/` | Rust MCP server — `main.rs` (protocol/transport), `tools.rs` (catalog + dispatch), `device.rs` (introspection & direct command exec) |
 | `Cargo.toml`, `.cargo/config.toml` | crate + cross-target config |
+| `assets/` | README artwork (SVG) |
+
+<div align="center">
+<sub>Binary payloads aren't accepted into the public Hak5 repo yet, but run fine for personal use. · Authorized testing only.</sub>
+</div>
