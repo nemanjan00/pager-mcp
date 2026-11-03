@@ -55,6 +55,12 @@ The server advertises two tiers of tools. **Passive is always on. Active is opt-
 | `recon_set_bands` / `recon_new_session` | choose 2.4/5/6 GHz bands · start a fresh recon session |
 | `list_filters` | show device (MAC) or network (SSID) filter lists |
 | `pcap_control` | start/stop the optimized Wi-Fi pcap log |
+| `bt_status` | **blue5** Bluetooth scanner / adapter state — LE+Classic mode, device counts, DB/WiGLE logging, GPS |
+| `bt_list` | survey nearby **Bluetooth** devices (BLE + Classic) with type / RSSI / age / named / connectable / company filters |
+| `bt_device_detail` | everything about one BT device — vendor, transport, Class-of-Device, appearance, services, raw mfr/service data |
+| `bt_scan_config` | tune the live blue5 scan (active LE, Classic inquiry, LE/Coded PHY, drop random, name requests, round/pause) |
+| `bt_recon_new` / `bt_recon_end` | start a fresh BT database scan · end the current one |
+| `bt_wigle` | toggle WiGLE CSV logging of Bluetooth devices |
 | `notify` | buzz the operator on the Pager (log / alert / vibrate / LED / ringtone) |
 
 ### 🟧 Active — only when `ALLOW_ACTIVE=true`
@@ -208,7 +214,7 @@ engagement network — in which case always set a token.
 | `payload.sh` | on-device launcher: runs `mcp-pager --tcp`, shows a status menu |
 | `config.sh` | operator configuration |
 | `build.sh` | cross-compile helper → `bin/mcp-pager` |
-| `src/` | Rust MCP server — `main.rs` (protocol/transport), `tools.rs` (catalog + dispatch), `device.rs` (introspection & direct command exec) |
+| `src/` | Rust MCP server — `main.rs` (protocol/transport), `tools.rs` (catalog + dispatch), `device.rs` (introspection & direct command exec), `recon.rs` (Wi-Fi recon SQLite queries), `bt.rs` (blue5 Bluetooth recon SQLite queries) |
 | `Cargo.toml`, `.cargo/config.toml` | crate + cross-target config |
 | `assets/` | README artwork (SVG) |
 

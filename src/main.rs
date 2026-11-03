@@ -18,6 +18,7 @@
 //! tools execute them directly — the server is self-contained and needs no shell
 //! bridge.
 
+mod bt;
 mod device;
 mod recon;
 mod tools;

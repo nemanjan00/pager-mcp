@@ -8,6 +8,7 @@
 //!                    filter edits); only advertised and permitted when the
 //!                    operator sets ALLOW_ACTIVE=true for an authorized engagement.
 
+use crate::bt;
 use crate::device;
 use crate::recon;
 use serde_json::{json, Value};
@@ -147,6 +148,54 @@ impl Server {
                     "timeout":{"type":"integer","minimum":1,"description":"Seconds before giving up."}
                 },
                 "required":["mac"],
+                "additionalProperties":false
+            })),
+            // ---- Bluetooth recon (blue5, Pager 2.0) ----
+            tool("bt_status", "blue5 Bluetooth scanner and adapter state: LE/Classic scan mode, device counts (LE/BR/dual), event rate, database/WiGLE logging state and GPS status.", json!({"type":"object","properties":{},"additionalProperties":false})),
+            tool("bt_list", "Survey Bluetooth devices seen by the blue5 scanner (BLE and Classic) from the current scan, strongest signal first. Defaults to the last 120s ('around me now'); set max_age_seconds=0 for the whole scan.", json!({
+                "type":"object",
+                "properties":{
+                    "type":{"type":"string","enum":["le","classic","dual"],"description":"Filter by transport: 'le' (BLE only), 'classic' (BR/EDR only) or 'dual'."},
+                    "max_age_seconds":{"type":"integer","minimum":0,"description":"Only devices heard within this many seconds (default 120; 0 = whole scan)."},
+                    "min_rssi":{"type":"integer","description":"Optional minimum average RSSI in dBm, e.g. -70 (stronger/closer only)."},
+                    "named_only":{"type":"boolean","description":"Only devices that advertised a name."},
+                    "connectable_only":{"type":"boolean","description":"Only LE-connectable devices."},
+                    "no_random":{"type":"boolean","description":"Drop LE random (rotating) addresses; keep public and Classic."},
+                    "company":{"type":"string","description":"Filter by Bluetooth SIG company id, e.g. '0x004C' (Apple) or '76'."},
+                    "limit":{"type":"integer","minimum":1,"maximum":1000,"description":"Max rows (default 100)."}
+                },
+                "additionalProperties":false
+            })),
+            tool("bt_device_detail", "Everything blue5 knows about one Bluetooth device (MAC): name, vendor/company, transport, connectability, Class-of-Device, appearance, advertised 16-bit services, RSSI history and raw manufacturer/service data (hex).", json!({
+                "type":"object",
+                "properties":{"mac":{"type":"string","description":"Device MAC, e.g. aa:bb:cc:dd:ee:ff (separators optional)."}},
+                "required":["mac"],
+                "additionalProperties":false
+            })),
+            tool("bt_scan_config", "Tune the live blue5 scan: toggle active LE, Classic (BR/EDR) inquiry, LE scanning, the LE Coded (long-range) PHY, dropping LE random addresses and Classic name requests, and set inquiry round length/pause. Only the fields you set are changed.", json!({
+                "type":"object",
+                "properties":{
+                    "active_le":{"type":"boolean","description":"Active LE scan (request scan responses, which often carry names)."},
+                    "classic":{"type":"boolean","description":"BR/EDR (Classic) inquiry on/off."},
+                    "le":{"type":"boolean","description":"LE scanning on/off (false = Classic only)."},
+                    "coded_phy":{"type":"boolean","description":"Also scan the LE Coded (long-range) PHY."},
+                    "drop_random":{"type":"boolean","description":"Drop LE random-address adverts so rotating addresses don't fill the table."},
+                    "name_requests":{"type":"boolean","description":"Classic name requests (false = more passive, never page for a name)."},
+                    "pause_seconds":{"type":"integer","minimum":0,"maximum":3600,"description":"Pause between Classic inquiry rounds (seconds)."},
+                    "round_units":{"type":"integer","minimum":1,"maximum":48,"description":"Classic inquiry round length in 1.28s units (1-48)."}
+                },
+                "additionalProperties":false
+            })),
+            tool("bt_recon_new", "Start a fresh blue5 database scan: flush and clear the device table and log to a new scan row (analogous to recon_new_session for Wi-Fi).", json!({
+                "type":"object",
+                "properties":{"name":{"type":"string","description":"Optional name for the new scan."}},
+                "additionalProperties":false
+            })),
+            tool("bt_recon_end", "End the current blue5 database scan: do a final flush, then stop writing to the database (the live scan keeps running).", json!({"type":"object","properties":{},"additionalProperties":false})),
+            tool("bt_wigle", "Turn WiGLE CSV logging of Bluetooth devices on or off (needs a GPS source and blue5 started with a WiGLE directory).", json!({
+                "type":"object",
+                "properties":{"action":{"type":"string","enum":["on","off"]}},
+                "required":["action"],
                 "additionalProperties":false
             })),
         ];
@@ -324,6 +373,68 @@ impl Server {
                 let mac = norm_mac(&req_str(args, "mac")?).ok_or("mac must look like aa:bb:cc:dd:ee:ff")?;
                 let timeout = opt_num_str(args, "timeout");
                 device::run_cmd("FIND_CLIENT_IP", &with_opt(&[mac], timeout))
+            }
+
+            // ---- Bluetooth recon (blue5), read-only + passive control ----
+            "bt_status" => device::run_cmd("blue5ctl", &["status".to_string()]),
+            "bt_list" => {
+                let type_filter = opt_str(args, "type");
+                let max_age = args.get("max_age_seconds").and_then(Value::as_i64).unwrap_or(120);
+                let min_rssi = args.get("min_rssi").and_then(Value::as_i64);
+                let named = args.get("named_only").and_then(Value::as_bool).unwrap_or(false);
+                let connectable = args.get("connectable_only").and_then(Value::as_bool).unwrap_or(false);
+                let no_random = args.get("no_random").and_then(Value::as_bool).unwrap_or(false);
+                let company = match args.get("company") {
+                    Some(Value::String(s)) => Some(parse_company(s)?),
+                    Some(Value::Number(n)) => n.as_i64(),
+                    _ => None,
+                };
+                let limit = args.get("limit").and_then(Value::as_i64).unwrap_or(100);
+                bt::list(type_filter.as_deref(), max_age, min_rssi, named, connectable, company, no_random, limit)
+            }
+            "bt_device_detail" => {
+                let mac = norm_mac(&req_str(args, "mac")?).ok_or("mac must look like aa:bb:cc:dd:ee:ff")?;
+                bt::detail(&mac)
+            }
+            "bt_scan_config" => {
+                let mut call: Vec<String> = vec!["scan".to_string()];
+                let mut push_bool = |key: &str, flag: &str| {
+                    if let Some(b) = args.get(key).and_then(Value::as_bool) {
+                        call.push(flag.to_string());
+                        call.push(if b { "1" } else { "0" }.to_string());
+                    }
+                };
+                push_bool("active_le", "-A");
+                push_bool("classic", "-C");
+                push_bool("le", "-E");
+                push_bool("coded_phy", "-c");
+                push_bool("drop_random", "-D");
+                push_bool("name_requests", "-M");
+                drop(push_bool);
+                if let Some(p) = args.get("pause_seconds").and_then(Value::as_i64) {
+                    call.push("-P".to_string());
+                    call.push(p.clamp(0, 3600).to_string());
+                }
+                if let Some(u) = args.get("round_units").and_then(Value::as_i64) {
+                    call.push("-L".to_string());
+                    call.push(u.clamp(1, 48).to_string());
+                }
+                if call.len() == 1 {
+                    return Err("set at least one scan parameter to change".to_string());
+                }
+                device::run_cmd("blue5ctl", &call)
+            }
+            "bt_recon_new" => {
+                let mut call = vec!["new".to_string()];
+                if let Some(name) = opt_str(args, "name").filter(|n| !n.is_empty()) {
+                    call.push(name);
+                }
+                device::run_cmd("blue5ctl", &call)
+            }
+            "bt_recon_end" => device::run_cmd("blue5ctl", &["end".to_string()]),
+            "bt_wigle" => {
+                let action = enum_arg(args, "action", &["on", "off"])?;
+                device::run_cmd("blue5ctl", &["wigle".to_string(), action])
             }
 
             // ---- full-access / active, gated behind ALLOW_ACTIVE ----
@@ -534,4 +645,15 @@ fn is_mac(s: &str) -> bool {
 
 fn is_num(s: &str) -> bool {
     !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Parse a Bluetooth SIG company id given as decimal ("76") or hex ("0x004C").
+fn parse_company(s: &str) -> Result<i64, String> {
+    let s = s.trim();
+    let parsed = if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        i64::from_str_radix(hex, 16)
+    } else {
+        s.parse::<i64>()
+    };
+    parsed.map_err(|_| format!("company must be a decimal or 0x-hex id (got {s})"))
 }
