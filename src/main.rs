@@ -14,6 +14,7 @@
 
 mod bt;
 mod device;
+mod intel;
 mod recon;
 mod tools;
 

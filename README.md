@@ -61,6 +61,12 @@ Tools fall into two groups by what they touch.
 | `bt_scan_config` | tune the live blue5 scan (active LE, Classic inquiry, LE/Coded PHY, drop random, name requests, round/pause) |
 | `bt_recon_new` / `bt_recon_end` | start a fresh BT database scan · end the current one |
 | `bt_wigle` | toggle WiGLE CSV logging of Bluetooth devices |
+| `connected_clients` | stations associated to the Pager's **own** APs (hostap_client) |
+| `probes` | probe-request SSIDs — raw `list` or `top` (ranked by distinct devices) |
+| `captured_credentials` | portal creds (loot) + WPA-Enterprise identities / challenge-responses |
+| `handshake_quality` | classify & dedupe captured handshakes (PMKID/EAPOL, per-ESSID) |
+| `find_suspicious` | heuristic sweep: Flipper, Flock Safety, BT skimmers, SSID spoofers, rogue Pineapples |
+| `gps` | native GPS: list devices · configure serial/baud · get fix |
 | `notify` | buzz the operator on the Pager (log / alert / vibrate / LED / ringtone) |
 
 ### 🟧 Device control & active RF — use only on an authorized engagement
@@ -75,6 +81,17 @@ Tools fall into two groups by what they touch.
 | `deauth_broadcast` | deauth **all** clients on an AP (deauth/disassoc, or CSA) |
 | `deauth_clients` | directed deauth of **specific** client MACs (feed from `recon_list`) |
 | `device_filter_edit` / `network_filter_edit` | manage MAC / SSID filter lists |
+| `ssid_pool` | manage the PineAP SSID pool (add/collect/start/stop/…) |
+| `mimic` | enable/disable PineAP mimic mode (evil-twin prerequisite) |
+| `clone_ap` | clone a recon AP's SSID/BSSID into the persistent Open AP (UCI) |
+| `evil_portal` / `captive_portal` | control Evil Portal · manage the nginx goodportal |
+| `wifi_wigle` / `wardrive` | Wi-Fi WiGLE logging · one-shot wardrive (GPS + WiGLE) |
+| `mac_spoof` | set / restore / show an interface MAC |
+| `mgmt_access` | toggle SSH + Web UI access from the Client Wi-Fi (firewall) |
+| `nmap_scan` | nmap host-discovery / subnet / SMB sweep → loot |
+| `hcx_capture` | hcxdumptool PMKID/EAPOL capture (if installed) |
+| `usb_export` | mount a USB drive, copy loot, lazy-unmount |
+| `hashtopolis_upload` | upload a 22000 hashfile to a Hashtopolis server |
 
 > 💡 **Hands-free capture loop:** poll `handshakes` with `since_seconds` (~every 30 s);
 > when a new row appears, fire `notify` to buzz the operator. A device-native alert
@@ -200,7 +217,7 @@ That's it — open the client and ask it what's on the air.
 | `payload.sh` | on-device helper: validates the binary and shows the SSH connection string (does not run the server) |
 | `config.sh` | operator configuration |
 | `build.sh` | cross-compile helper → `bin/mcp-pager` |
-| `src/` | Rust MCP server — `main.rs` (protocol/transport), `tools.rs` (catalog + dispatch), `device.rs` (introspection & direct command exec), `recon.rs` (Wi-Fi recon SQLite queries), `bt.rs` (blue5 Bluetooth recon SQLite queries) |
+| `src/` | Rust MCP server — `main.rs` (protocol/transport), `tools.rs` (catalog + dispatch), `device.rs` (introspection & direct command exec), `recon.rs` (Wi-Fi recon SQLite), `bt.rs` (blue5 Bluetooth recon SQLite), `intel.rs` (handshake-quality / probes / credentials / threat-sweep reads) |
 | `Cargo.toml`, `.cargo/config.toml` | crate + cross-target config |
 | `assets/` | README artwork (SVG) |
 
