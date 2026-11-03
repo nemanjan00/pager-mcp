@@ -1,12 +1,11 @@
 //! MCP tool catalog and dispatch.
 //!
 //! All tools run on-device directly (introspection via fs/env, device actions by
-//! exec'ing the PINEAPPLE_*/DuckyScript binaries). They fall into three groups:
-//!   * direct       - read-only device introspection
-//!   * passive      - recon tuning / status (non-attacking)
-//!   * full-access  - bash, duckyscript, and traffic-affecting actions (deauth,
-//!                    filter edits); only advertised and permitted when the
-//!                    operator sets ALLOW_ACTIVE=true for an authorized engagement.
+//! exec'ing the PINEAPPLE_*/DuckyScript and blue5ctl binaries). Every tool is
+//! always advertised and callable: the server is reached over SSH, so the caller
+//! already has a root shell and an in-server capability gate would protect
+//! nothing. Loosely, they are read-only recon/loot, passive recon tuning, and
+//! full device control + active RF (bash, duckyscript, deauth, filter edits).
 
 use crate::bt;
 use crate::device;
@@ -16,7 +15,6 @@ use std::path::PathBuf;
 
 pub struct Server {
     pub loot_dir: PathBuf,
-    pub allow_active: bool,
     pub read_cap: usize,
     pub recon: Value,
 }
@@ -26,10 +24,6 @@ const READ_CAP_DEFAULT: usize = 256 * 1024;
 impl Server {
     pub fn from_env() -> Server {
         let loot_dir = std::env::var("MCP_LOOT_DIR").unwrap_or_else(|_| "/root/loot".to_string());
-        let allow_active = matches!(
-            std::env::var("MCP_ALLOW_ACTIVE").unwrap_or_default().as_str(),
-            "1" | "true" | "yes" | "on"
-        );
         let read_cap = std::env::var("MCP_READ_CAP_BYTES")
             .ok()
             .and_then(|v| v.parse().ok())
@@ -37,7 +31,6 @@ impl Server {
             .unwrap_or(READ_CAP_DEFAULT);
         Server {
             loot_dir: PathBuf::from(loot_dir),
-            allow_active,
             read_cap,
             recon: device::recon_context(),
         }
@@ -200,8 +193,10 @@ impl Server {
             })),
         ];
 
-        if self.allow_active {
-            tools.push(tool("bash", "[FULL ACCESS] Run an arbitrary bash command on the Pager (via 'bash -c'). DuckyScript/PINEAPPLE_* commands are on PATH and callable from here too. Returns combined stdout/stderr and the exit code. Long-running work should be backgrounded (e.g. 'cmd & echo started').", json!({
+        // Full device control + active RF tools. The transport is root SSH, so
+        // anyone who can reach this server already has a root shell; these add no
+        // new privilege, they just expose it as structured tools.
+        tools.push(tool("bash", "[FULL ACCESS] Run an arbitrary bash command on the Pager (via 'bash -c'). DuckyScript/PINEAPPLE_* commands are on PATH and callable from here too. Returns combined stdout/stderr and the exit code. Long-running work should be backgrounded (e.g. 'cmd & echo started').", json!({
                 "type":"object",
                 "properties":{"command":{"type":"string","description":"Shell command(s) to run. May span multiple lines."}},
                 "required":["command"],
@@ -258,7 +253,6 @@ impl Server {
                 "required":["list","action"],
                 "additionalProperties":false
             })));
-        }
         tools
     }
 
@@ -437,13 +431,7 @@ impl Server {
                 device::run_cmd("blue5ctl", &["wigle".to_string(), action])
             }
 
-            // ---- full-access / active, gated behind ALLOW_ACTIVE ----
-            "bash" | "duckyscript" | "deauth_broadcast" | "deauth_clients" | "device_filter_edit"
-            | "network_filter_edit"
-                if !self.allow_active =>
-            {
-                Err("full-access tools are disabled; set ALLOW_ACTIVE=true in config.sh for an authorized engagement".to_string())
-            }
+            // ---- full device control + active RF ----
             "bash" => {
                 let cmd = req_str(args, "command")?;
                 device::run_bash(&cmd)

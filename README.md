@@ -4,18 +4,19 @@
 
 ![badges](assets/badges.svg)
 
-**Your LLM, holding a Wi-Fi scanner.**
+**Your LLM, holding a Wi-Fi + Bluetooth scanner.**
 A tiny Rust [MCP](https://modelcontextprotocol.io) server that lets Claude *see* what the
-Hak5 WiFi Pineapple Pager sees — nearby APs, clients, captured handshakes, loot —
-and, when you explicitly arm it, *act* on an authorized engagement.
+Hak5 WiFi Pineapple Pager sees — nearby APs, clients, Bluetooth devices, captured
+handshakes, loot — and *act* on an authorized engagement.
 
 </div>
 
 > [!WARNING]
-> **Authorized use only.** This payload controls a wireless auditing device. Run it
-> only against networks and clients you own or are explicitly authorized to test.
-> Every traffic-affecting tool is **disabled by default** and must be armed with
-> `ALLOW_ACTIVE=true` — see [What it can do](#what-it-can-do).
+> **Authorized use only.** This payload controls a wireless auditing device and
+> exposes full device control (including deauth and arbitrary root commands) to your
+> MCP client. The server is reached over SSH — whoever can launch it already has a
+> root shell on the Pager — so access control is your SSH access. Run it only against
+> networks, clients and devices you own or are explicitly authorized to test.
 
 ---
 
@@ -35,11 +36,10 @@ no daemon. One self-contained **~300 KB** binary that runs straight over SSH std
 
 ## What it can do
 
-The server advertises two tiers of tools. **Passive is always on. Active is opt-in.**
+Every tool is always advertised and callable — the SSH login is the trust boundary.
+Tools fall into two groups by what they touch.
 
-### 🟦 Passive — always available, read-only
-
-> Recon, loot, and introspection. Nothing touches the air.
+### 🟦 Recon, loot & introspection — nothing touches the air
 
 | Tool | What it gives Claude |
 |------|----------------------|
@@ -63,9 +63,10 @@ The server advertises two tiers of tools. **Passive is always on. Active is opt-
 | `bt_wigle` | toggle WiGLE CSV logging of Bluetooth devices |
 | `notify` | buzz the operator on the Pager (log / alert / vibrate / LED / ringtone) |
 
-### 🟧 Active — only when `ALLOW_ACTIVE=true`
+### 🟧 Device control & active RF — use only on an authorized engagement
 
-> Full device control. Advertise these **only** for an authorized engagement.
+> Full device control and frames on the air. The SSH login already grants all of
+> this; these tools just expose it structured.
 
 | Tool | What it does |
 |------|--------------|
@@ -74,9 +75,6 @@ The server advertises two tiers of tools. **Passive is always on. Active is opt-
 | `deauth_broadcast` | deauth **all** clients on an AP (deauth/disassoc, or CSA) |
 | `deauth_clients` | directed deauth of **specific** client MACs (feed from `recon_list`) |
 | `device_filter_edit` / `network_filter_edit` | manage MAC / SSID filter lists |
-
-When `ALLOW_ACTIVE=false` (the default) these are neither listed in `tools/list`
-nor executable. With it on, the client has complete control of the device.
 
 > 💡 **Hands-free capture loop:** poll `handshakes` with `since_seconds` (~every 30 s);
 > when a new row appears, fire `notify` to buzz the operator. A device-native alert
@@ -98,8 +96,10 @@ directly — no payload shell context required. So `mcp-pager` just `exec`s them
 `std::process::Command`. **No bridge, no daemon dependency.** Read-only
 introspection (loot, recon env, system info) is handled in-process with
 path-traversal protection and size caps. The `recon_*` / `handshakes` tools read the
-recon daemon's SQLite DB (`/root/recon/recon.db`, override with `MCP_RECON_DB`);
-MAC/BSSID args are accepted with or without `:` / `-` separators.
+Wi-Fi recon daemon's SQLite DB (`/root/recon/recon.db`, override `MCP_RECON_DB`), and
+the `bt_*` tools read the **blue5** Bluetooth recon DB (`/root/recon/blue5.db`,
+override `MCP_BT_DB`) and drive its `blue5ctl` control socket; MAC/BSSID args are
+accepted with or without `:` / `-` separators.
 
 ---
 
@@ -148,62 +148,48 @@ confirmed running on-device. `build.sh` also accepts `METHOD=cross` (Docker) if 
 scp bin/mcp-pager root@172.16.52.1:/root/mcp-pager
 ```
 
-That alone is enough for the recommended connection below. (For the on-device
-background service, also copy `payload.sh` + `config.sh` into a payload directory
-via the Pager UI or `/root/payloads/...`. `payload.sh` restores the executable bit
-on every launch, so it's safe to ship as a zip.)
+That alone is enough. (Optionally also copy `payload.sh` + `config.sh` into a payload
+directory via the Pager UI or `/root/payloads/...`; it doesn't run the server — it
+just validates the binary and shows the connection string. `payload.sh` restores the
+executable bit on every launch, so it's safe to ship as a zip.)
 
-### 3. Wire up your MCP client — stdio over SSH *(recommended: no tunnel, no daemon)*
+### 3. Wire up your MCP client — stdio over SSH
 
 The binary is self-contained, so the client just launches it over SSH and talks to
-its stdio. **Claude Code** (`.mcp.json` or `claude mcp add`):
+its stdio. No tunnel, no daemon, no token. **Claude Code** (`.mcp.json` or
+`claude mcp add`):
 
 ```json
 {
   "mcpServers": {
     "pager": {
       "command": "ssh",
-      "args": ["root@172.16.52.1", "MCP_ALLOW_ACTIVE=1 /root/mcp-pager"]
+      "args": ["root@172.16.52.1", "/root/mcp-pager"]
     }
   }
 }
 ```
 
-Drop `MCP_ALLOW_ACTIVE=1` to stay passive/read-only. Add `MCP_LOOT_DIR=...` to point
-elsewhere. **Claude Desktop** (`claude_desktop_config.json`) uses the same shape.
+Add `MCP_LOOT_DIR=...` before the path to point loot elsewhere. **Claude Desktop**
+(`claude_desktop_config.json`) uses the same shape.
 
 That's it — open the client and ask it what's on the air.
-
-<details>
-<summary><b>Alternative — on-device TCP service + SSH tunnel</b></summary>
-
-Launch `payload.sh` on the Pager (LED → **blue solid**); it runs
-`mcp-pager --tcp 127.0.0.1:8099`. Then from your workstation:
-
-```bash
-ssh -L 8099:127.0.0.1:8099 root@172.16.52.1          # tunnel
-# MCP client command:  socat STDIO TCP:127.0.0.1:8099
-```
-
-Set `MCP_TCP_TOKEN` (in `config.sh`) and the client must send it as `_auth` in the
-`initialize` params. Keep `BIND_ADDR` on loopback unless you're on an isolated
-engagement network — in which case always set a token.
-
-</details>
 
 ---
 
 ## Security model
 
-- **Access control lives at the transport.** stdio-over-SSH inherits your SSH auth;
-  TCP mode binds **loopback** by default, and any off-loopback bind should set
-  `MCP_TCP_TOKEN` and run only on an isolated engagement network.
-- `read_loot` / `list_loot` are sandboxed to `MCP_LOOT_DIR`, reject `..` traversal,
-  and `read_loot` is size-capped (`MCP_READ_CAP_BYTES`).
-- Active tools (`bash`, `duckyscript`, `deauth_*`, `*_filter_edit`) are gated by
-  `MCP_ALLOW_ACTIVE` and **off by default** — when off they are neither advertised
-  nor executable. With them on, the client has full device control, so arm them only
-  for an authorized engagement.
+- **The transport is the trust boundary.** The server speaks stdio only and is
+  launched over SSH, so it inherits your SSH authentication. Anyone who can start it
+  already has a root shell on the Pager — so there is no separate token, no network
+  listener, and no in-server capability gate: that would protect nothing SSH doesn't
+  already grant, and only gets in the way. Keep SSH access to the Pager controlled.
+- Every tool is always available, **including `bash`, `duckyscript`, `deauth_*` and
+  `*_filter_edit`** — full device control and frames on the air. Use it only on
+  engagements you are authorized to run.
+- `read_loot` / `list_loot` are still sandboxed to `MCP_LOOT_DIR`, reject `..`
+  traversal, and `read_loot` is size-capped (`MCP_READ_CAP_BYTES`) — these protect
+  the **client's context window**, not the device.
 
 ---
 
@@ -211,7 +197,7 @@ engagement network — in which case always set a token.
 
 | File | Role |
 |------|------|
-| `payload.sh` | on-device launcher: runs `mcp-pager --tcp`, shows a status menu |
+| `payload.sh` | on-device helper: validates the binary and shows the SSH connection string (does not run the server) |
 | `config.sh` | operator configuration |
 | `build.sh` | cross-compile helper → `bin/mcp-pager` |
 | `src/` | Rust MCP server — `main.rs` (protocol/transport), `tools.rs` (catalog + dispatch), `device.rs` (introspection & direct command exec), `recon.rs` (Wi-Fi recon SQLite queries), `bt.rs` (blue5 Bluetooth recon SQLite queries) |
